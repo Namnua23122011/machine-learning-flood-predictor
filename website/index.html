@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Enter Chiang Mai rainfall and river measurements to calculate a flood model prediction.">
+<title>Chiang Mai · Flood predictor</title>
+<style>
+:root{font-family:Segoe UI,Arial,sans-serif;color:#162e40;background:#eef3f7;font-size:16px}*{box-sizing:border-box}body{margin:0}header{background:#102f46;color:white;padding:24px max(24px,calc((100vw - 1100px)/2));border-bottom:4px solid #20b6bc}header strong{font-size:1.15rem}header span{display:block;color:#b5d2e2;margin-top:6px;font-size:.9rem}main{max-width:1150px;margin:40px auto;padding:0 24px}h1{font-size:clamp(1.8rem,4vw,2.5rem);letter-spacing:-.04em;margin:0 0 10px}p{line-height:1.6}.intro{color:#536a7b;margin-bottom:30px}.layout{display:grid;grid-template-columns:1.5fr 1fr;gap:24px;align-items:start}.panel{background:white;border:1px solid #d6e1e8;border-radius:16px;padding:28px;box-shadow:0 8px 30px #153e5010}h2{margin:0 0 6px;font-size:1.25rem}.hint{color:#536a7b;font-size:.9rem;margin:6px 0 22px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:20px}label{display:block;font-size:.95rem;font-weight:600;margin-bottom:8px}input,select,button{font:inherit}input,select{width:100%;padding:12px;border:1px solid #a8bac7;border-radius:8px;background:#fff;color:#162e40;min-height:48px}input:focus,select:focus,button:focus-visible{outline:3px solid #35b7c4;outline-offset:3px}button{cursor:pointer;border:0;border-radius:9px;padding:14px 18px;font-weight:600}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}.primary{background:#096873;color:white;flex:1}.secondary{background:#e9f0f5;color:#26485d}button:disabled{opacity:.6;cursor:wait}.eyebrow{text-transform:uppercase;letter-spacing:.12em;font-size:.8rem;color:#526e7e;font-weight:700}.probability{font-size:clamp(3rem,7vw,4.5rem);font-weight:700;letter-spacing:-.06em;margin:20px 0 10px;color:#104b60}.track{height:10px;border-radius:10px;background:#e5edf2;overflow:hidden}.fill{height:100%;width:0;background:#0d8991}.status{font-size:1.1rem;font-weight:600;margin-top:22px}.note{font-size:.9rem;color:#536a7b;border-top:1px solid #dce5eb;margin-top:24px;padding-top:18px}.error{color:#9b2525;background:#fff0f0;padding:12px;border-radius:8px;margin-top:18px}.tag{display:inline-block;background:#e8f3f5;color:#215867;padding:6px 10px;border-radius:6px;font-size:.85rem;margin-top:16px}footer{color:#536a7b;font-size:.85rem;margin:24px 0}a{color:#096873}@media(max-width:780px){main{margin-top:26px}.layout{grid-template-columns:1fr}.panel{padding:22px}}@media(max-width:430px){.fields{grid-template-columns:1fr}}
+[hidden]{display:none!important}button[aria-pressed="true"]{background:#096873;color:white}input:disabled,select:disabled{background:#eef3f7;color:#365263}</style>
+</head>
+<body>
+<header><strong>CHIANG MAI / Flood predictor</strong><span>Rainfall &amp; river observations</span></header>
+<main>
+<nav class="actions" style="margin:0 0 24px"><a href="/forecast">พยากรณ์ล่วงหน้า / Future outlook</a><a href="/history">ประวัติการนำเข้า / กราฟ</a><a href="/api/history/export.xlsx">ดาวน์โหลด Excel</a></nav>
+<h1>ประเมินน้ำท่วมเชียงใหม่</h1>
+<p class="intro">เลือกดึงข้อมูลล่าสุดจาก API หรือกำหนดข้อมูลเพื่อทดลองด้วยตนเอง</p>
+
+
+<section class="panel" style="margin-bottom:24px">
+<h2>ดึงข้อมูลฝน ระดับน้ำ และเขื่อน</h2>
+<p class="hint">ดึงและเติม 5 ช่องในครั้งเดียว · เดือน พายุ และความชื้นดินให้กรอกเอง · ฝนรายวันจาก Open-Meteo เป็นค่าประมาณย้อนหลัง ส่วนข้อมูลสถานีมาจาก ThaiWater</p>
+<div class="actions"><button id="water-button" class="primary" type="button">นำเข้าจาก API และบันทึก Excel (5 ช่อง)</button></div>
+<p id="water-time" class="hint"></p>
+<div id="water-result" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:14px" aria-live="polite"></div>
+</section>
+<div class="layout">
+<section class="panel" aria-labelledby="inputs-title">
+<h2 id="inputs-title">กำหนดข้อมูลเอง</h2>
+<p class="hint">ค่าฝนหน่วยมม. ระดับน้ำหน่วยม. เขื่อนเป็น % และความชื้นดินเป็นดัชนี 0–1</p>
+<form id="prediction-form">
+<div class="fields">
+<div><label for="month">เดือน</label><select id="month" name="month" required><option value="">เลือกเดือน</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></div>
+<div><label for="typhoon_active">มีพายุ</label><select id="typhoon_active" name="typhoon_active" required><option value="">เลือกสถานะ</option><option value="0">ไม่มี</option><option value="1">มี</option></select></div>
+<div><label for="rainfall_24h">ฝนรายวัน (มม.)</label><input id="rainfall_24h" name="rainfall_24h" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
+<div><label for="rainfall_7day">ฝน 7 วันก่อนหน้า ไม่รวมวันปัจจุบัน (มม.)</label><input id="rainfall_7day" name="rainfall_7day" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
+<div><label for="upstream_rain">ฝนต้นน้ำ (มม.)</label><input id="upstream_rain" name="upstream_rain" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
+<div><label for="ping_level">ระดับน้ำปิง (ม.)</label><input id="ping_level" name="ping_level" type="number" step="any" required placeholder="Enter river level"></div>
+<div><label for="mae_ngat_storage">น้ำในเขื่อนแม่งัด (%)</label><input id="mae_ngat_storage" name="mae_ngat_storage" type="number" min="0" max="100" step="any" required placeholder="Enter storage"></div>
+<div><label for="soil_moisture">ความชื้นดิน (ดัชนี 0–1)</label><input id="soil_moisture" name="soil_moisture" type="number" min="0" max="1" step="any" required placeholder="Enter moisture"></div>
+</div>
+<div class="actions"><button class="primary" id="submit-button" type="submit">คำนวณผล</button><button class="secondary" id="example-button" type="button">ใช้ข้อมูลตัวอย่าง</button></div>
+<p class="hint" id="example-note" hidden>Example values only — these are not current observations.</p>
+<p id="error" class="error" role="alert" hidden></p>
+</form>
+</section>
+<aside class="panel" aria-labelledby="result-title">
+<h2 id="result-title">ผลการประเมิน</h2>
+<div aria-live="polite" aria-atomic="true">
+<div class="probability" id="probability">—</div>
+<div class="eyebrow">โอกาสน้ำท่วมที่โมเดลประเมิน</div>
+<div class="track" style="margin-top:18px" aria-hidden="true"><div class="fill" id="fill"></div></div>
+<p class="status" id="status">พร้อมรับข้อมูล</p>
+<p class="hint" id="detail">กรอกข้อมูลให้ครบ แล้วกดคำนวณ</p>
+</div>
+<span class="tag">Gradient Boosting model</span>
+<p class="note">โมเดลนี้ฝึกด้วยข้อมูลจำลองและใช้ระดับน้ำสร้างป้ายกำกับ จึงเป็นการสาธิต ไม่ใช่ระบบพยากรณ์หรือเตือนภัยที่ยืนยันกับเหตุการณ์จริง</p>
+</aside>
+</div>
+<footer>Local prediction tool · <a href="/docs">API documentation</a></footer>
+</main>
+<script src="/site.js?v=single-api" defer></script><script src="/water-panel.js?v=history-1" defer></script>
+</body>
+</html>
+
+

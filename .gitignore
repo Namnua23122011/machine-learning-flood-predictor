@@ -1,0 +1,27 @@
+# Python environments and generated files
+myenv.venv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Secrets and machine-specific editor settings
+.env
+.env.*
+!.env.example
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+*.log
+
+# Local backups and runtime history (keep the empty data directory)
+backups/
+/data/*
+!/data/.gitkeep
+*.sqlite3
+*.sqlite3-*
+
+# Deployment models, website assets and notebooks are intentionally tracked.

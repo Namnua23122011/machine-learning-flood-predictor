@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!requirements.txt
+!api/
+!api/**
+!models/
+!models/chiangmai_flood_model.pkl
+!models/features.csv
+!models/scaler.pkl
+!website/
+!website/**
+**/__pycache__/
+**/*.pyc
