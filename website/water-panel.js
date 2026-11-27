@@ -27,16 +27,22 @@ waterButton.onclick=async()=>{
  }catch(e){waterResult.textContent=e.name==='AbortError'?'หมดเวลารอ กรุณาลองใหม่':'นำเข้าหรือบันทึกไม่สำเร็จ กรุณาตรวจว่า app.py ทำงานอยู่ และดูประวัติก่อนลองอีกครั้ง';document.getElementById('water-time').textContent='';}
  finally{clearTimeout(timer);waterButton.disabled=false;}
 };
+function observationDate(value){
+ if(typeof value!=='string')return new Date(NaN);
+ let time=value.trim().replace(' ','T');
+ if(/^\d{4}-\d{2}-\d{2}$/.test(time))time+='T00:00:00';
+ if(!/(Z|[+-]\d{2}:?\d{2})$/i.test(time))time+='+07:00';
+ return new Date(time);
+}
 function fillWaterInputs(){
  if(!waterSnapshot)return;let count=0;
  for(const key of ['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage']){
   const r=waterSnapshot.readings[key];
   const maxAge=['mae_ngat_storage','rainfall_24h','rainfall_7day'].includes(key)?48*3600:3*3600;
-  const time=r.observed_at;
-  const observed=time?new Date(time.length===10?time+'T00:00:00+07:00':time.replace(' ','T')+':00+07:00'):new Date(NaN);
+  const observed=observationDate(r.observed_at);
   const age=(Date.now()-observed.getTime())/1000;
   const input=form.elements.namedItem(key);
-  if(r.status==='fresh'&&Number.isFinite(age)&&age>=-300&&age<=maxAge&&!(input.max&&r.value>Number(input.max))){input.value=r.value;count++;}else input.value='';
+  if(r.status==='fresh'&&Number.isFinite(r.value)&&Number.isFinite(age)&&age>=-300&&age<=maxAge&&!(input.max&&r.value>Number(input.max))){input.value=r.value;count++;}else input.value='';
  }
  clearResult();document.getElementById('example-note').textContent=`เติมข้อมูลล่าสุด ${count}/5 ช่องแล้ว เดือน พายุ และความชื้นดินยังเป็นค่าที่คุณกำหนด โปรดตรวจวันที่ของข้อมูลแต่ละแหล่งก่อนคำนวณ`;document.getElementById('example-note').hidden=false;
 };

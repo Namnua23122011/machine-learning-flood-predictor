@@ -77,8 +77,6 @@ def normalized_feed(data, now):
                 continue
             if name == 'soil_moisture' and not 0 <= value <= 1:
                 continue
-            if name == 'mae_ngat_storage' and not 0 <= value <= 100:
-                continue
             if name not in ('ping_level',) and value < 0:
                 continue
             values[name] = value
@@ -653,7 +651,8 @@ class PredictionInput(BaseModel):
     rainfall_7day: float = Field(..., ge=0)
     upstream_rain: float = Field(..., ge=0)
     ping_level: float
-    mae_ngat_storage: float = Field(..., ge=0, le=100)
+    # Percentage of normal capacity; valid reservoir reports can exceed 100%.
+    mae_ngat_storage: float = Field(..., ge=0)
     soil_moisture: float = Field(..., ge=0, le=1)
     typhoon_active: int = Field(..., ge=0, le=1)
 
