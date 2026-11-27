@@ -36,7 +36,7 @@
 <div><label for="rainfall_7day">ฝน 7 วันก่อนหน้า ไม่รวมวันปัจจุบัน (มม.)</label><input id="rainfall_7day" name="rainfall_7day" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
 <div><label for="upstream_rain">ฝนต้นน้ำ (มม.)</label><input id="upstream_rain" name="upstream_rain" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
 <div><label for="ping_level">ระดับน้ำปิง (ม.)</label><input id="ping_level" name="ping_level" type="number" step="any" required placeholder="Enter river level"></div>
-<div><label for="mae_ngat_storage">น้ำในเขื่อนแม่งัด (%)</label><input id="mae_ngat_storage" name="mae_ngat_storage" type="number" min="0" max="100" step="any" required placeholder="Enter storage"></div>
+<div><label for="mae_ngat_storage">น้ำในเขื่อนแม่งัด (% ความจุปกติ)</label><input id="mae_ngat_storage" name="mae_ngat_storage" type="number" min="0" step="any" required placeholder="Enter storage"><p class="hint">อาจเกิน 100% เมื่อปริมาณน้ำสูงกว่าความจุปกติ</p></div>
 <div><label for="soil_moisture">ความชื้นดิน (ดัชนี 0–1)</label><input id="soil_moisture" name="soil_moisture" type="number" min="0" max="1" step="any" required placeholder="Enter moisture"></div>
 </div>
 <div class="actions"><button class="primary" id="submit-button" type="submit">คำนวณผล</button><button class="secondary" id="example-button" type="button">ใช้ข้อมูลตัวอย่าง</button></div>
