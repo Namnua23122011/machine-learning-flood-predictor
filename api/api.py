@@ -4,6 +4,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 import io
 import json
 import logging
@@ -14,7 +15,8 @@ import sqlite3
 import tempfile
 import threading
 import time
-from urllib.parse import urlencode
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import UUID
 
@@ -47,8 +49,106 @@ def fetch_json(url, token=None):
     headers = {'Accept': 'application/json', 'User-Agent': 'ChiangMaiFloodLocal/1.0'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
-    with urlopen(Request(url, headers=headers), timeout=12) as response:
-        return json.load(response)
+    for attempt in range(2):
+        try:
+            with urlopen(Request(url, headers=headers), timeout=10) as response:
+                return json.load(response)
+        except (HTTPError, URLError, TimeoutError, ConnectionError) as exc:
+            # Retry temporary transport failures once; never immediately retry 429.
+            retryable = not isinstance(exc, HTTPError) or exc.code in (502, 503, 504)
+            if isinstance(exc, HTTPError):
+                exc.close()
+            if not retryable or attempt:
+                raise
+            time.sleep(0.5)
+
+
+class ProviderError(Exception):
+    """A public, credential-free description of an upstream failure."""
+    def __init__(self, details):
+        self.details = details
+        super().__init__(details['note'])
+
+
+def provider_error(exc):
+    if isinstance(exc, ProviderError):
+        return dict(exc.details)
+    if isinstance(exc, HTTPError):
+        exc.close()
+        if exc.code == 429:
+            delay = 300
+            retry_after = exc.headers.get('Retry-After') if exc.headers else None
+            if retry_after:
+                try:
+                    seconds = float(retry_after)
+                except ValueError:
+                    try:
+                        seconds = (parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds()
+                    except (TypeError, ValueError, OverflowError):
+                        seconds = 300
+                if math.isfinite(seconds):
+                    delay = max(1, math.ceil(seconds))
+            return {'error_code': 'rate_limited', 'http_status': 429,
+                    'retry_after_seconds': delay,
+                    'note': 'ผู้ให้บริการจำกัดจำนวนคำขอ (HTTP 429) ระบบจะพักการเรียกข้อมูล กรุณาลองใหม่ภายหลัง'}
+        return {'error_code': 'upstream_http_error', 'http_status': exc.code,
+                'note': f'ผู้ให้บริการตอบ HTTP {exc.code} กรุณาลองใหม่ภายหลัง'}
+    if isinstance(exc, TimeoutError) or isinstance(getattr(exc, 'reason', None), TimeoutError):
+        return {'error_code': 'timeout', 'note': 'หมดเวลารอผู้ให้บริการ กรุณาลองใหม่ภายหลัง'}
+    if isinstance(exc, (URLError, ConnectionError)):
+        return {'error_code': 'connection_failed', 'note': 'เชื่อมต่อผู้ให้บริการไม่สำเร็จ กรุณาลองใหม่ภายหลัง'}
+    return {'error_code': 'invalid_data', 'note': 'ข้อมูลจากผู้ให้บริการไม่ครบหรือรูปแบบเปลี่ยนไป'}
+
+
+_weather_request_lock = threading.Lock()
+_weather_request_locks = {}
+_weather_responses = {}
+_weather_cooldowns = {}
+
+
+def fetch_weather(public_url):
+    """Share weather responses across imports/realtime; respect provider cooldowns."""
+    api_key = os.environ.get('OPEN_METEO_API_KEY', '').strip()
+    parts = urlsplit(public_url)
+    host = 'customer-api.open-meteo.com' if api_key else 'api.open-meteo.com'
+    provider = (host, api_key)
+    cache_key = (public_url, api_key)
+    with _weather_request_lock:
+        lock = _weather_request_locks.setdefault(cache_key, threading.Lock())
+    with lock:
+        now = time.monotonic()
+        with _weather_request_lock:
+            cached = _weather_responses.get(cache_key)
+            cooldown = _weather_cooldowns.get(provider)
+        if cached and now < cached['expires'] and cached['day'] == datetime.now(TZ).date():
+            if 'data' in cached:
+                return json.loads(json.dumps(cached['data']))
+            raise ProviderError(cached['error'])
+        if cooldown and now < cooldown['expires']:
+            raise ProviderError({**cooldown['error'],
+                                 'retry_after_seconds': math.ceil(cooldown['expires'] - now)})
+        query = parts.query + ('&' + urlencode({'apikey': api_key}) if api_key else '')
+        request_url = urlunsplit((parts.scheme, host, parts.path, query, ''))
+        try:
+            data = fetch_json(request_url)
+        except Exception as exc:
+            error = provider_error(exc)
+            now = time.monotonic()
+            with _weather_request_lock:
+                if error['error_code'] == 'rate_limited':
+                    _weather_cooldowns[provider] = {
+                        'expires': now + error['retry_after_seconds'], 'error': error}
+                else:
+                    _weather_responses[cache_key] = {
+                        'expires': now + 30, 'day': datetime.now(TZ).date(), 'error': error}
+            logging.warning('Open-Meteo fetch failed: %s (HTTP %s)',
+                            error['error_code'], error.get('http_status', '-'))
+            # Do not retain an upstream URL/API key in the public exception.
+            raise ProviderError(error) from None
+        with _weather_request_lock:
+            _weather_responses[cache_key] = {
+                'expires': time.monotonic() + 300, 'day': datetime.now(TZ).date(), 'data': data}
+        return json.loads(json.dumps(data))
 
 
 def normalized_feed(data, now):
@@ -126,7 +226,7 @@ def get_realtime():
                 url = 'https://api.open-meteo.com/v1/forecast?' + urlencode({
                     'latitude': 18.7883, 'longitude': 98.9853, 'daily': 'rain_sum',
                     'past_days': 8, 'forecast_days': 1, 'timezone': 'Asia/Bangkok'})
-                values, metadata = weather_inputs(fetch_json(url), now)
+                values, metadata = weather_inputs(fetch_weather(url), now)
         except Exception:
             # Do not expose upstream URLs, tokens, or response internals.
             errors.append('ดึงข้อมูลจากผู้ให้บริการไม่สำเร็จ กรุณาลองใหม่ภายหลัง')
@@ -155,8 +255,9 @@ _water_expires = 0
 _water_lock = threading.Lock()
 
 def fetch(url):
-    with urlopen(url, timeout=12) as r:
-        return json.load(r)
+    if urlsplit(url).hostname == 'api.open-meteo.com':
+        return fetch_weather(url)
+    return fetch_json(url)
 
 def number(v):
     if v is None or isinstance(v, bool):
@@ -213,8 +314,11 @@ def get_water_summary():
                 for key, f in jobs.items():
                     try:
                         result['readings'][key] = parse(key, f.result(), now)
-                    except Exception:
-                        result['readings'][key] = {'status': 'unavailable', 'value': None, 'note': 'ดึงข้อมูลไม่สำเร็จหรือข้อมูลเปลี่ยนรูปแบบ', 'source_url': URLS[key]}
+                    except Exception as exc:
+                        error = provider_error(exc)
+                        logging.warning('Station fetch failed for %s: %s', key, error['error_code'])
+                        result['readings'][key] = {'status': 'unavailable', 'value': None,
+                                                   **error, 'source_url': URLS[key]}
             _water_cache = json.loads(json.dumps(result))
             _water_expires = time.monotonic()+(300 if all(r['status'] != 'unavailable' for r in result['readings'].values()) else 30)
         for k, r in result['readings'].items():
@@ -247,10 +351,11 @@ def get_all_inputs():
                     'source_url':RAIN_URL, 'station':'พิกัดเมืองเชียงใหม่ 18.7883, 98.9853',
                     'note':('ฝนของวันล่าสุดที่จบแล้ว ไม่ใช่สถานีวัดสด' if key=='rainfall_24h'
                             else 'ฝนสะสม 7 วันก่อนวันเป้าหมาย ไม่รวมวันเป้าหมาย ตามสูตรฝึกโมเดล')}
-        except Exception:
+        except Exception as exc:
+            error = provider_error(exc)
             for key in ('rainfall_24h','rainfall_7day'):
                 result['readings'][key] = {'value':None,'status':'unavailable',
-                    'note':'ดึงฝนไม่สำเร็จหรือข้อมูลช่วง 8 วันไม่ครบ','source_url':RAIN_URL}
+                    **error, 'source_url':RAIN_URL}
     result['water_fetched_at'] = result['fetched_at']
     result['fetched_at'] = now.isoformat()
     result['all_available'] = all(r['status']=='fresh' for r in result['readings'].values())
@@ -483,8 +588,9 @@ def weather_sources():
                     source.update(series=hourly_rain(data), status='available',
                                   fetched_at=datetime.now(TZ).isoformat(),
                                   grid_latitude=data.get('latitude'), grid_longitude=data.get('longitude'))
-                except Exception:
-                    logging.exception('Weather outlook fetch failed for %s', key)
+                except Exception as exc:
+                    source.update(provider_error(exc))
+                    logging.warning('Weather outlook fetch failed for %s: %s', key, source['error_code'])
                 sources[key] = source
         _forecast_cache = sources
         _forecast_expires = time.monotonic() + (600 if all(s['status'] == 'available' for s in sources.values()) else 30)

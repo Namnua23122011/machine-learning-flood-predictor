@@ -42,3 +42,33 @@ GET /api/history/export.xlsx
 
 A reused request_id returns the original record rather than creating a duplicate.
 Each new intentional button click has its own request_id.
+
+## Provider failures on hosted deployments
+
+The import can save a history record even when an upstream provider is unavailable.
+Check each reading's status and note; a saved record does not mean all five values
+were fetched. Unavailable values stay blank, including when the provider returns
+HTTP 429 (Too Many Requests).
+
+Open-Meteo responses are shared between imports and realtime requests for five
+minutes. Concurrent identical requests share one fetch. Failed requests are cached
+for 30 seconds; HTTP 429 pauses all new Open-Meteo requests for the provider's
+Retry-After duration (five minutes if absent). Existing unexpired successful cache
+entries remain usable. The daily cache resets when the Bangkok calendar day changes.
+Transport failures and HTTP 502/503/504 are retried once, but 429 is not immediately
+retried. The import button waits up to 90 seconds to allow a sleeping host to start.
+
+If a hosted server continues receiving 429 after the cooldown, caching cannot
+restore the provider's quota. Wait for the quota to reset or, if you already have
+an Open-Meteo subscription, configure `OPEN_METEO_API_KEY` in the host's environment
+and redeploy. This selects the official `customer-api.open-meteo.com` endpoint for
+both imports and forecasts. Without a key the free endpoint is used. Keys stay on
+the server and are not included in source links, history exports, or error messages.
+See https://open-meteo.com/en/pricing for the provider's current limits and plans.
+
+Run regression checks from the project root:
+
+```powershell
+.\myenv.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_*.py'
+node --test tests/water-import.test.cjs
+```
