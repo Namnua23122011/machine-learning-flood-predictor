@@ -19,7 +19,7 @@
 
 <section class="panel" style="margin-bottom:24px">
 <h2>นำเข้าข้อมูลทั้งหมดบน dashboard</h2>
-<p class="hint">กดครั้งเดียวเพื่อตรวจครบทั้ง 9 ช่อง เติมข้อมูลที่มีแหล่งข้อมูล พร้อมบันทึกประวัติและ Excel · เดือนตรงกับวันข้อมูลฝน · ช่องที่ยังไม่มีข้อมูลพายุหรือดัชนีความชื้นดินจะแสดงว่าไม่มีข้อมูลและให้กรอกเอง · ฝนรายวันและปริมาณน้ำในดินมาจากแบบจำลอง Open-Meteo ส่วนข้อมูลสถานีมาจาก ThaiWater</p>
+<p class="hint">กดครั้งเดียวเพื่อตรวจครบทั้ง 9 ช่อง เติมค่าที่มีพร้อมบันทึกประวัติและ Excel · ค่าที่เป็นรายงานเก่าจะเติมพร้อมระบุเวลาและสถานะข้อมูลเก่า · เดือนตรงกับวันข้อมูลฝน · ช่องที่ไม่มีข้อมูลหรือหน่วยไม่ตรงจะแสดงเหตุผลใต้ช่อง · ฝนรายวันและปริมาณน้ำในดินมาจากแบบจำลอง Open-Meteo ส่วนข้อมูลสถานีมาจาก ThaiWater</p>
 <div class="actions"><button id="water-button" class="primary" type="button">นำเข้าข้อมูลทั้งหมดและบันทึก Excel</button></div>
 <p id="water-time" class="hint"></p>
 <div id="water-result" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:14px" aria-live="polite"></div>
@@ -32,12 +32,12 @@
 <div class="fields">
 <div><label for="month">เดือนของข้อมูล</label><select id="month" name="month" required aria-describedby="month-import-note"><option value="">เลือกเดือน</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select><p class="hint" id="month-import-note">เติมอัตโนมัติตามเดือนของวันข้อมูลฝนเมื่อกดนำเข้า</p></div>
 <div><label for="typhoon_active">มีพายุ</label><select id="typhoon_active" name="typhoon_active" required aria-describedby="typhoon_active-import-note"><option value="">เลือกสถานะ</option><option value="0">ไม่มี</option><option value="1">มี</option></select><p class="hint" id="typhoon_active-import-note">หากไม่มีแหล่งข้อมูลที่ยืนยันสถานะพายุ ระบบจะแจ้งให้กรอกเอง</p></div>
-<div><label for="rainfall_24h">ฝนรายวัน (มม.)</label><input id="rainfall_24h" name="rainfall_24h" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
-<div><label for="rainfall_7day">ฝน 7 วันก่อนหน้า ไม่รวมวันปัจจุบัน (มม.)</label><input id="rainfall_7day" name="rainfall_7day" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
-<div><label for="upstream_rain">ฝนต้นน้ำ (มม.)</label><input id="upstream_rain" name="upstream_rain" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
-<div><label for="ping_level">ระดับน้ำปิง (ม.)</label><input id="ping_level" name="ping_level" type="number" step="any" required placeholder="Enter river level"></div>
-<div><label for="mae_ngat_storage">น้ำในเขื่อนแม่งัด (% ความจุปกติ)</label><input id="mae_ngat_storage" name="mae_ngat_storage" type="number" min="0" step="any" required placeholder="Enter storage"><p class="hint">อาจเกิน 100% เมื่อปริมาณน้ำสูงกว่าความจุปกติ</p></div>
-<div><label for="soil_moisture_vwc">ปริมาณน้ำในดิน 0–1 ซม. จาก API (m³/m³)</label><input id="soil_moisture_vwc" name="soil_moisture_vwc" type="number" min="0" max="1" step="any" readonly placeholder="กดนำเข้าข้อมูลทั้งหมด" aria-describedby="soil-api-note"><p class="hint" id="soil-api-note">ค่าจากแบบจำลอง Open-Meteo แสดงและบันทึกในประวัติ ยังไม่มีการเทียบค่านี้กับดัชนีของโมเดลน้ำท่วม</p></div>
+<div><label for="rainfall_24h">ฝนรายวัน (มม.)</label><input id="rainfall_24h" name="rainfall_24h" type="number" min="0" step="any" required placeholder="Enter rainfall" aria-describedby="rainfall_24h-import-note"><p class="hint" id="rainfall_24h-import-note"></p></div>
+<div><label for="rainfall_7day">ฝน 7 วันก่อนหน้า ไม่รวมวันปัจจุบัน (มม.)</label><input id="rainfall_7day" name="rainfall_7day" type="number" min="0" step="any" required placeholder="Enter rainfall" aria-describedby="rainfall_7day-import-note"><p class="hint" id="rainfall_7day-import-note"></p></div>
+<div><label for="upstream_rain">ฝนต้นน้ำ (มม.)</label><input id="upstream_rain" name="upstream_rain" type="number" min="0" step="any" required placeholder="Enter rainfall" aria-describedby="upstream_rain-import-note"><p class="hint" id="upstream_rain-import-note"></p></div>
+<div><label for="ping_level">ระดับน้ำปิง (ม.)</label><input id="ping_level" name="ping_level" type="number" step="any" required placeholder="Enter river level" aria-describedby="ping_level-import-note"><p class="hint" id="ping_level-import-note"></p></div>
+<div><label for="mae_ngat_storage">น้ำในเขื่อนแม่งัด (% ความจุปกติ)</label><input id="mae_ngat_storage" name="mae_ngat_storage" type="number" min="0" step="any" required placeholder="Enter storage" aria-describedby="mae_ngat_storage-import-note"><p class="hint" id="mae_ngat_storage-import-note"></p><p class="hint">อาจเกิน 100% เมื่อปริมาณน้ำสูงกว่าความจุปกติ</p></div>
+<div><label for="soil_moisture_vwc">ปริมาณน้ำในดิน 0–1 ซม. จาก API (m³/m³)</label><input id="soil_moisture_vwc" name="soil_moisture_vwc" type="number" min="0" max="1" step="any" readonly placeholder="กดนำเข้าข้อมูลทั้งหมด" aria-describedby="soil-api-note soil_moisture_vwc-import-note"><p class="hint" id="soil_moisture_vwc-import-note"></p><p class="hint" id="soil-api-note">ค่าจากแบบจำลอง Open-Meteo แสดงและบันทึกในประวัติ ยังไม่มีการเทียบค่านี้กับดัชนีของโมเดลน้ำท่วม</p></div>
 <div><label for="soil_moisture">ดัชนีความชื้นดินของโมเดล (0–1)</label><input id="soil_moisture" name="soil_moisture" type="number" min="0" max="1" step="any" required placeholder="กรอกดัชนีสำหรับโมเดล" aria-describedby="soil_moisture-import-note"><p class="hint" id="soil_moisture-import-note">หากไม่มีแหล่งข้อมูลดัชนีที่ตรงกับโมเดล ระบบจะแจ้งให้กรอกเอง ปริมาณน้ำในดิน m³/m³ ใช้แทนโดยตรงไม่ได้</p></div>
 </div>
 <div class="actions"><button class="primary" id="submit-button" type="submit">คำนวณผล</button><button class="secondary" id="example-button" type="button">ใช้ข้อมูลตัวอย่าง</button></div>
@@ -60,7 +60,7 @@
 </div>
 <footer>Local prediction tool · <a href="/docs">API documentation</a></footer>
 </main>
-<script src="/site.js?v=single-api" defer></script><script src="/water-panel.js?v=dashboard-all-5" defer></script>
+<script src="/site.js?v=single-api" defer></script><script src="/water-panel.js?v=reading-sync-6" defer></script>
 </body>
 </html>
 

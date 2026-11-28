@@ -8,8 +8,11 @@ Start the app with the same virtual environment:
 Restart an already-running server and refresh the page with Ctrl+F5.
 
 Click the single API import button to check all nine dashboard fields, fill every
-available value, and save an immutable import record. Missing or stale values are
-cleared and identified by name; they are never replaced with zero. A typical import
+available value, and save an immutable import record. Valid numeric readings also
+fill the form when the provider report is old; the card and field both show the
+original observation time and an explicit stale-data warning. Missing values,
+wrong units, out-of-range values, invalid dates and future timestamps are cleared
+with a specific reason beside the field; they are never replaced with zero. A typical import
 has seven available fields and two explicitly unavailable model inputs (see below).
 Any valid month, storm and model soil-index entries from before the click are saved
 separately as manual context, even when the imported fields replace or clear them.
@@ -66,6 +69,13 @@ The default `all` scope contains the existing six weather/station measurements p
 coverage. `manual_fields` lists prediction inputs still needing an entry. The page
 shows all nine reading cards, specific missing-field messages, and inline notes for
 month, storm and the model soil index. Importing does not run a prediction.
+
+Cards and form inputs use the same validation. Age is evaluated against the server's
+check timestamp, so a misconfigured device clock does not reject a valid reading.
+The form summary separates imported stale readings from fields that cannot be
+filled. API freshness counts and saved history statuses remain unchanged: a stale
+reading may be filled for reference while still appearing in `missing_fields`
+(fields without fresh data). History charts continue to leave gaps for stale data.
 
 The existing `FLOOD_DATA_URL` / `FLOOD_DATA_TOKEN` adapter can supply storm and model
 soil-index values using the [normalized realtime contract](REALTIME_README.md).
