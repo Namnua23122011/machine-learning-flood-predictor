@@ -19,8 +19,8 @@
 
 <section class="panel" style="margin-bottom:24px">
 <h2>นำเข้าฝน ความชื้นดิน ระดับน้ำ และเขื่อน</h2>
-<p class="hint">นำเข้า 6 รายการพร้อมบันทึกประวัติและ Excel หรือเลือกเฉพาะฝน / ความชื้นดิน · ฝนรายวันและปริมาณน้ำในดินจาก Open-Meteo เป็นค่าประมาณจากแบบจำลอง ส่วนข้อมูลสถานีมาจาก ThaiWater · เดือน พายุ และดัชนีความชื้นดินของโมเดลให้กรอกเอง</p>
-<div class="actions"><button id="water-button" class="primary" type="button">นำเข้าทั้งหมดและบันทึก Excel (6 รายการ)</button><button id="rain-button" class="secondary" type="button">นำเข้าเฉพาะฝน (มม.)</button><button id="soil-button" class="secondary" type="button">นำเข้าความชื้นดิน</button></div>
+<p class="hint">กดครั้งเดียวเพื่อนำเข้าทั้ง 6 รายการ พร้อมบันทึกประวัติและ Excel · ฝนรายวันและปริมาณน้ำในดินจาก Open-Meteo เป็นค่าประมาณจากแบบจำลอง ส่วนข้อมูลสถานีมาจาก ThaiWater · เดือน พายุ และดัชนีความชื้นดินของโมเดลให้กรอกเอง</p>
+<div class="actions"><button id="water-button" class="primary" type="button">นำเข้าข้อมูลทั้งหมดและบันทึก Excel (6 รายการ)</button></div>
 <p id="water-time" class="hint"></p>
 <div id="water-result" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:14px" aria-live="polite"></div>
 </section>
@@ -37,7 +37,7 @@
 <div><label for="upstream_rain">ฝนต้นน้ำ (มม.)</label><input id="upstream_rain" name="upstream_rain" type="number" min="0" step="any" required placeholder="Enter rainfall"></div>
 <div><label for="ping_level">ระดับน้ำปิง (ม.)</label><input id="ping_level" name="ping_level" type="number" step="any" required placeholder="Enter river level"></div>
 <div><label for="mae_ngat_storage">น้ำในเขื่อนแม่งัด (% ความจุปกติ)</label><input id="mae_ngat_storage" name="mae_ngat_storage" type="number" min="0" step="any" required placeholder="Enter storage"><p class="hint">อาจเกิน 100% เมื่อปริมาณน้ำสูงกว่าความจุปกติ</p></div>
-<div><label for="soil_moisture_vwc">ปริมาณน้ำในดิน 0–1 ซม. จาก API (m³/m³)</label><input id="soil_moisture_vwc" name="soil_moisture_vwc" type="number" min="0" max="1" step="any" readonly placeholder="กดนำเข้าความชื้นดิน" aria-describedby="soil-api-note"><p class="hint" id="soil-api-note">ค่าจากแบบจำลอง Open-Meteo แสดงและบันทึกในประวัติ ยังไม่มีการเทียบค่านี้กับดัชนีของโมเดลน้ำท่วม</p></div>
+<div><label for="soil_moisture_vwc">ปริมาณน้ำในดิน 0–1 ซม. จาก API (m³/m³)</label><input id="soil_moisture_vwc" name="soil_moisture_vwc" type="number" min="0" max="1" step="any" readonly placeholder="กดนำเข้าข้อมูลทั้งหมด" aria-describedby="soil-api-note"><p class="hint" id="soil-api-note">ค่าจากแบบจำลอง Open-Meteo แสดงและบันทึกในประวัติ ยังไม่มีการเทียบค่านี้กับดัชนีของโมเดลน้ำท่วม</p></div>
 <div><label for="soil_moisture">ดัชนีความชื้นดินของโมเดล (0–1)</label><input id="soil_moisture" name="soil_moisture" type="number" min="0" max="1" step="any" required placeholder="กรอกดัชนีสำหรับโมเดล"><p class="hint">ดัชนีจำลองสำหรับคำนวณผล แยกจากปริมาณน้ำในดิน m³/m³ ที่นำเข้าจาก API</p></div>
 </div>
 <div class="actions"><button class="primary" id="submit-button" type="submit">คำนวณผล</button><button class="secondary" id="example-button" type="button">ใช้ข้อมูลตัวอย่าง</button></div>
@@ -60,7 +60,7 @@
 </div>
 <footer>Local prediction tool · <a href="/docs">API documentation</a></footer>
 </main>
-<script src="/site.js?v=single-api" defer></script><script src="/water-panel.js?v=soil-rain-3" defer></script>
+<script src="/site.js?v=single-api" defer></script><script src="/water-panel.js?v=all-inputs-4" defer></script>
 </body>
 </html>
 

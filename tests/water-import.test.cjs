@@ -22,7 +22,7 @@ function fixture(fetchImpl) {
   }
   const elements = {};
   const context = vm.createContext({
-    document: {getElementById: id => elements[id] ??= element(), createElement: element},
+    document: {getElementById: id => html.includes('id="'+id+'"') ? elements[id] ??= element() : null, createElement: element},
     form: {elements: {namedItem: key => inputs[key]}},
     clearResult() {}, setMode() {}, generation: 0, mode: 'manual', Date, Number,
     AbortController, setTimeout, clearTimeout, crypto: {randomUUID}, fetch: fetchImpl,
@@ -116,52 +116,30 @@ test('import completion does not overwrite form edits made while waiting', async
   assert.match(elements['water-time'].textContent, /มีการแก้ไขแบบฟอร์มระหว่างรอ/);
 });
 
-test('rain-only button saves and fills rainfall without changing other inputs', async () => {
-  const readings = Object.fromEntries(keys.slice(0,3).map((key,i) => [key, {
-    value: [0, 28, 0][i], status: 'fresh', observed_at: new Date().toISOString(), unit: 'มม.',
+test('one import button requests and fills all six readings while preserving the manual model index', async () => {
+  const readings = Object.fromEntries(keys.map((key,i) => [key, {
+    value: [0, 28, 0, 2.5, 102.2, 0.31][i], status: 'fresh', observed_at: new Date().toISOString(), unit: key==='soil_moisture_vwc'?'m³/m³':'test',
   }]));
-  let body;
+  const calls = [];
   const {context, inputs, elements} = fixture(async (url, options) => {
-    body = JSON.parse(options.body);
-    return {ok: true, json: async () => ({readings, scope: 'rainfall', history_id: 14, fetched_at: new Date().toISOString()})};
-  });
-  inputs.ping_level.value = '2.5';
-  inputs.soil_moisture.value = '0.8';
-  inputs.soil_moisture_vwc.value = '0.31';
-  await vm.runInContext('rainButton.onclick()', context);
-  assert.equal(body.scope, 'rainfall');
-  assert.equal(inputs.rainfall_24h.value, 0);
-  assert.equal(inputs.rainfall_7day.value, 28);
-  assert.equal(inputs.upstream_rain.value, 0);
-  assert.equal(inputs.ping_level.value, '2.5');
-  assert.equal(inputs.soil_moisture.value, '0.8');
-  assert.equal(inputs.soil_moisture_vwc.value, '0.31');
-  assert.match(elements['example-note'].textContent, /3\/3/);
-  assert.equal(elements['water-result'].children.length, 3);
-});
-
-test('soil-only button imports volumetric moisture without changing the model index or rain', async () => {
-  let body;
-  const {context, inputs, elements} = fixture(async (url, options) => {
-    body = JSON.parse(options.body);
-    return {ok: true, json: async () => ({readings: {soil_moisture_vwc: {
-      value: 0, status: 'fresh', observed_at: new Date().toISOString(), unit: 'm³/m³',
-    }}, scope: 'soil_moisture', history_id: 15, fetched_at: new Date().toISOString()})};
+    calls.push({url, body: JSON.parse(options.body)});
+    assert.equal(elements['water-button'].disabled, true);
+    return {ok: true, json: async () => ({readings, scope: 'all', history_id: 14, fetched_at: new Date().toISOString()})};
   });
   inputs.soil_moisture.value = '0.8';
-  inputs.rainfall_24h.value = '12';
-  await vm.runInContext('soilButton.onclick()', context);
-  assert.equal(body.scope, 'soil_moisture');
-  assert.equal(body.soil_moisture, 0.8);
-  assert.equal(inputs.soil_moisture_vwc.value, 0);
+  await vm.runInContext('waterButton.onclick()', context);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/import');
+  assert.equal(calls[0].body.scope, 'all');
+  assert.equal(calls[0].body.soil_moisture, 0.8);
+  for(const key of keys) assert.equal(inputs[key].value, readings[key].value);
   assert.equal(inputs.soil_moisture.value, '0.8');
-  assert.equal(inputs.rainfall_24h.value, '12');
-  assert.match(elements['example-note'].textContent, /1\/1/);
-  assert.equal(elements['water-result'].children.length, 1);
-  for(const key of ['water-button','rain-button','soil-button']) assert.equal(elements[key].disabled, false);
+  assert.match(elements['example-note'].textContent, /6\/6/);
+  assert.equal(elements['water-result'].children.length, 6);
+  assert.equal(elements['water-button'].disabled, false);
 });
 
-test('invalid, missing or expired soil readings clear previous imported soil only', () => {
+test('invalid, missing or expired soil readings clear imported soil while preserving the manual model index', () => {
   const {context, inputs} = fixture();
   const valid = {value: 0.31, status: 'fresh', observed_at: new Date().toISOString(), unit: 'm³/m³'};
   inputs.soil_moisture.value = '0.8';
@@ -169,7 +147,7 @@ test('invalid, missing or expired soil readings clear previous imported soil onl
     {...valid, value: null}, {...valid, unit: '%'}, {...valid, status: 'stale'},
     {...valid, observed_at: new Date(Date.now()-4*3600000).toISOString()}]) {
     inputs.soil_moisture_vwc.value = '0.45';
-    vm.runInContext('waterSnapshot='+JSON.stringify({scope: 'soil_moisture', readings: {soil_moisture_vwc: reading}})+';fillWaterInputs()', context);
+    vm.runInContext('waterSnapshot='+JSON.stringify({scope: 'all', readings: {soil_moisture_vwc: reading}})+';fillWaterInputs()', context);
     assert.equal(inputs.soil_moisture_vwc.value, '');
     assert.equal(inputs.soil_moisture.value, '0.8');
   }

@@ -1,26 +1,22 @@
 'use strict';
 const waterButton=document.getElementById('water-button');
-const rainButton=document.getElementById('rain-button');
-const soilButton=document.getElementById('soil-button');
 const waterResult=document.getElementById('water-result');
-const importGroups={all:['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage','soil_moisture_vwc'],rainfall:['rainfall_24h','rainfall_7day','upstream_rain'],soil_moisture:['soil_moisture_vwc']};
+const importFields=['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage','soil_moisture_vwc'];
 const readingTitles={rainfall_24h:'ฝนรายวัน',rainfall_7day:'ฝนสะสม 7 วันก่อนหน้า',ping_level:'ระดับน้ำปิง',upstream_rain:'ฝนต้นน้ำ',mae_ngat_storage:'น้ำในเขื่อนแม่งัด',soil_moisture_vwc:'ปริมาณน้ำในดิน 0–1 ซม.'};
 let waterSnapshot=null;
-waterButton.onclick=()=>importMeasurements('all');
-rainButton.onclick=()=>importMeasurements('rainfall');
-soilButton.onclick=()=>importMeasurements('soil_moisture');
-async function importMeasurements(scope){
+waterButton.onclick=()=>importMeasurements();
+async function importMeasurements(){
  const manualContext={};
  for(const k of ['month','typhoon_active','soil_moisture']){const input=form.elements.namedItem(k);if(input.value!==''&&!input.checkValidity()){input.reportValidity();return;}manualContext[k]=input.value===''?null:Number(input.value);}
- setMode('manual');const requestGeneration=generation;for(const button of [waterButton,rainButton,soilButton])button.disabled=true;waterResult.textContent=`กำลังดึงข้อมูล ${importGroups[scope].length} รายการ…`;waterSnapshot=null;
+ setMode('manual');const requestGeneration=generation;waterButton.disabled=true;waterResult.textContent=`กำลังดึงข้อมูล ${importFields.length} รายการ…`;waterSnapshot=null;
  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),90000);
  try{
-  const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:crypto.randomUUID(),scope,...manualContext}),signal:abort.signal});
+  const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:crypto.randomUUID(),scope:'all',...manualContext}),signal:abort.signal});
   const data=await response.json().catch(()=>null);
   if(!response.ok)throw new Error('นำเข้าไม่สำเร็จ (HTTP '+response.status+')'+(typeof data?.detail==='string'?': '+data.detail:''));
   if(!data?.readings)throw new Error('API ส่งข้อมูลกลับมาไม่ครบ กรุณาลองใหม่');
-  waterSnapshot={...data,scope};waterResult.replaceChildren();
-  for(const key of importGroups[scope]){
+  waterSnapshot=data;waterResult.replaceChildren();
+  for(const key of importFields){
    const r=data.readings[key]||{};const card=document.createElement('section');card.className='panel';
    const h=document.createElement('h3');h.textContent=readingTitles[key];card.append(h);
    const value=document.createElement('p');value.style='font-size:1.8rem;font-weight:700;margin:12px 0';value.textContent=!Number.isFinite(r.value)?'ไม่มีข้อมูล':`${r.value.toLocaleString('th-TH',{maximumFractionDigits:3})} ${r.unit||''}`;card.append(value);
@@ -35,7 +31,7 @@ async function importMeasurements(scope){
   const historyLink=document.createElement('a');historyLink.href='/history?id='+data.history_id;historyLink.textContent=' ดูรายการนี้และกราฟ';document.getElementById('water-time').append(historyLink);
   if(data.excel_warning){const warning=document.createElement('p');warning.textContent=data.excel_warning;warning.style.color='#a23b16';waterResult.append(warning);}
  }catch(e){waterResult.textContent=e.name==='AbortError'?'หมดเวลารอเซิร์ฟเวอร์ กรุณาดูประวัติก่อนลองอีกครั้ง':e instanceof TypeError?'เชื่อมต่อ API ไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตและสถานะเซิร์ฟเวอร์ แล้วดูประวัติก่อนลองอีกครั้ง':e.message;document.getElementById('water-time').textContent='';}
- finally{clearTimeout(timer);for(const button of [waterButton,rainButton,soilButton])button.disabled=false;}
+ finally{clearTimeout(timer);waterButton.disabled=false;}
 }
 function observationDate(value){
  if(typeof value!=='string')return new Date(NaN);
@@ -46,7 +42,7 @@ function observationDate(value){
 }
 function fillWaterInputs(){
  if(!waterSnapshot)return;let count=0;
- const keys=importGroups[waterSnapshot.scope||'all'];
+ const keys=importFields;
  for(const key of keys){
   const r=waterSnapshot.readings[key]||{};
   const maxAge=['mae_ngat_storage','rainfall_24h','rainfall_7day'].includes(key)?48*3600:3*3600;

@@ -8,8 +8,8 @@ Start the app with the same virtual environment:
 Restart an already-running server and refresh the page with Ctrl+F5.
 
 Click the API import button to fetch six measurements, fill the form, and save
-an immutable import record. You can also import only rainfall (three readings) or
-only soil moisture (one reading); other form values are preserved. The three manual fields are captured as entered at the
+an immutable import record. The page has one button that imports all six readings
+together. The three manual fields are captured as entered at the
 moment of clicking; empty manual fields stay blank. Later edits and predictions do
 not change that record. Partial/failed readings are recorded with their status.
 
