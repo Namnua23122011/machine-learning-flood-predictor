@@ -339,7 +339,7 @@ IMPORT_FIELDS = {
     'rainfall': ('rainfall_24h', 'rainfall_7day', 'upstream_rain'),
     'soil_moisture': ('soil_moisture_vwc',),
     'all': ('rainfall_24h', 'rainfall_7day', 'upstream_rain', 'ping_level',
-            'mae_ngat_storage', 'soil_moisture_vwc'),
+            'mae_ngat_storage', 'soil_moisture_vwc', 'month', 'typhoon_active', 'soil_moisture'),
 }
 
 
@@ -410,20 +410,56 @@ def get_weather_readings():
     return readings
 
 
+def get_dashboard_context(now):
+    """Complete the dashboard contract without inventing unavailable model inputs."""
+    day = now.astimezone(TZ).date() - timedelta(days=1)
+    readings = {
+        'month': {'value': day.month, 'unit': 'month', 'status': 'fresh',
+                  'observed_at': now.isoformat(), 'kind': 'calendar',
+                  'source': 'ปฏิทินประเทศไทย (Asia/Bangkok)',
+                  'note': f'เดือนของวันข้อมูลฝน {day.isoformat()} ซึ่งเป็นวันล่าสุดที่จบแล้ว'},
+        'typhoon_active': {'value': None, 'unit': '0_or_1', 'status': 'unavailable',
+                          'error_code': 'not_configured',
+                          'note': 'ยังไม่มีแหล่งข้อมูลพายุที่ตรงกับโมเดล กรุณาระบุเอง ไม่ตีความว่าข้อมูลขาดหายคือไม่มีพายุ'},
+        'soil_moisture': {'value': None, 'unit': 'index_0_1', 'status': 'unavailable',
+                         'error_code': 'not_configured',
+                         'note': 'ยังไม่มีแหล่งข้อมูลดัชนีความชื้นดินที่ตรงกับโมเดล กรุณากรอกเอง ไม่ใช้ปริมาณน้ำในดิน m³/m³ แทน'},
+    }
+    if os.environ.get('FLOOD_DATA_URL'):
+        # Reuse the existing normalized provider's units, range and one-hour checks.
+        data = get_realtime()
+        for key in ('typhoon_active', 'soil_moisture'):
+            if key in data['values']:
+                readings[key] = {'value': data['values'][key], **data['metadata'][key],
+                                 'status': 'fresh', 'max_age_seconds': 3600,
+                                 'note': 'ข้อมูลจากแหล่งที่กำหนดไว้ หน่วยและค่าผ่านการตรวจสอบตามสัญญา API'}
+            else:
+                readings[key].update(error_code='provider_unavailable',
+                                     note='แหล่งข้อมูลที่กำหนดไว้ไม่มีค่าล่าสุดที่ผ่านการตรวจสอบ กรุณากรอกเอง')
+    return readings
+
+
 def get_all_inputs(scope='all'):
     now = datetime.now(TZ)
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         water = pool.submit(get_water_summary) if scope != 'soil_moisture' else None
         weather = pool.submit(get_weather_readings)
+        context = pool.submit(get_dashboard_context, now) if scope == 'all' else None
         result = water.result() if water else {'readings': {}, 'fetched_at': now.isoformat(), 'refresh_seconds': 300}
         result['readings'].update(weather.result())
+        if context:
+            result['readings'].update(context.result())
     result['readings'] = {key: result['readings'][key] for key in IMPORT_FIELDS[scope]}
     result['scope'] = scope
     result['water_fetched_at'] = result['fetched_at'] if water else None
     result['fetched_at'] = now.isoformat()
     result['checked_at'] = now.isoformat()
     result['all_available'] = all(r['status']=='fresh' for r in result['readings'].values())
-    result['manual_fields'] = ['month','typhoon_active','soil_moisture']
+    result['missing_fields'] = [key for key, reading in result['readings'].items() if reading['status'] != 'fresh']
+    result['available_count'] = len(result['readings']) - len(result['missing_fields'])
+    result['requested_count'] = len(result['readings'])
+    result['manual_fields'] = [key for key in REALTIME_FIELDS
+                               if result['readings'].get(key, {}).get('status') != 'fresh']
     result['note'] = 'ข้อมูลต่างช่วงเวลา: ฝนรายวันเป็นค่าประมาณย้อนหลัง น้ำปิง/ฝนต้นน้ำเป็นค่าล่าสุด เขื่อนเป็นรายวัน ปริมาณน้ำในดินเป็นค่าประมาณรายชั่วโมง หน่วย m³/m³ โปรดตรวจวันที่ก่อนทำนาย'
     return result
 
@@ -512,7 +548,7 @@ class HistoryStore:
         book = Workbook()
         summary = book.active
         summary.title = 'Imports'
-        summary.append(['Import ID', 'Imported at (Bangkok)', 'Rain daily (mm)', 'Rain prior 7 days (mm)', 'Upstream rain 24h (mm)', 'Ping gauge level (m)', 'Mae Ngat storage (%)', 'Soil water content 0–1 cm (m³/m³)', 'Month (manual)', 'Storm 0/1 (manual)', 'Soil index 0–1 (manual)', 'Fresh API fields', 'Requested API fields', 'Import scope'])
+        summary.append(['Import ID', 'Imported at (Bangkok)', 'Rain daily (mm)', 'Rain prior 7 days (mm)', 'Upstream rain 24h (mm)', 'Ping gauge level (m)', 'Mae Ngat storage (%)', 'Soil water content 0–1 cm (m³/m³)', 'Month (imported)', 'Storm 0/1 (imported)', 'Soil index 0–1 (imported)', 'Month (manual before import)', 'Storm 0/1 (manual before import)', 'Soil index 0–1 (manual)', 'Fresh API fields', 'Requested API fields', 'Import scope'])
         details = book.create_sheet('Reading details')
         details.append(['Import ID', 'Field', 'Value', 'Unit', 'Status at import', 'Observation time (Bangkok)', 'Source', 'Station', 'Source URL', 'Notes', 'Volume (million m3)', 'Normal capacity (million m3)', 'Max capacity (million m3)', 'Soil depth (cm)', 'Grid latitude', 'Grid longitude'])
         for record in records:

@@ -31,14 +31,14 @@ function fixture(fetchImpl) {
   return {context, inputs, elements};
 }
 
-test('imports all six readings, preserving zero rain, soil units and storage above normal capacity', () => {
+test('imports available measurements, preserving zero rain, soil units and storage above normal capacity', () => {
   const {context, inputs, elements} = fixture();
   const readings = Object.fromEntries(keys.map((key, i) => [key, {
     value: [3.5, 1.6, 0, 1.46, 102.2, 0.31][i], status: 'fresh', observed_at: new Date().toISOString(), unit: key==='soil_moisture_vwc'?'m³/m³':'test',
   }]));
   vm.runInContext('waterSnapshot='+JSON.stringify({readings})+';fillWaterInputs()', context);
   for (const key of keys) assert.equal(inputs[key].value, readings[key].value);
-  assert.match(elements['example-note'].textContent, /6\/6/);
+  assert.match(elements['example-note'].textContent, /6\/9/);
   assert.equal(inputs.soil_moisture.value, '');
 });
 
@@ -62,7 +62,7 @@ test('missing, stale, expired, future and invalid readings stay blank', () => {
   };
   vm.runInContext('waterSnapshot='+JSON.stringify({readings})+';fillWaterInputs()', context);
   for (const key of keys) assert.equal(inputs[key].value, '');
-  assert.match(elements['example-note'].textContent, /ยังนำเข้าข้อมูลล่าสุดไม่ได้ \(0\/6/);
+  assert.match(elements['example-note'].textContent, /ยังนำเข้าข้อมูลล่าสุดไม่ได้ \(0\/9/);
 });
 
 test('import button displays provider rate limit and still fills available station readings', async () => {
@@ -84,7 +84,7 @@ test('import button displays provider rate limit and still fills available stati
   assert.equal(inputs.rainfall_7day.value, '');
   assert.equal(inputs.upstream_rain.value, 0);
   assert.equal(inputs.mae_ngat_storage.value, 102.2);
-  assert.match(elements['example-note'].textContent, /3\/6/);
+  assert.match(elements['example-note'].textContent, /3\/9/);
   const rendered = elements['water-result'].children.flatMap(card => card.children.map(node => node.textContent)).join(' ');
   assert.match(rendered, /HTTP 429/);
   assert.match(rendered, /2 นาที/);
@@ -116,10 +116,13 @@ test('import completion does not overwrite form edits made while waiting', async
   assert.match(elements['water-time'].textContent, /มีการแก้ไขแบบฟอร์มระหว่างรอ/);
 });
 
-test('one import button requests and fills all six readings while preserving the manual model index', async () => {
+test('one import covers nine dashboard fields and identifies unavailable storm and model index', async () => {
   const readings = Object.fromEntries(keys.map((key,i) => [key, {
     value: [0, 28, 0, 2.5, 102.2, 0.31][i], status: 'fresh', observed_at: new Date().toISOString(), unit: key==='soil_moisture_vwc'?'m³/m³':'test',
   }]));
+  readings.month = {value: 11, status: 'fresh', observed_at: new Date().toISOString(), unit: 'month'};
+  readings.typhoon_active = {value: null, status: 'unavailable', unit: '0_or_1', note: 'ยังไม่มีแหล่งข้อมูลพายุ'};
+  readings.soil_moisture = {value: null, status: 'unavailable', unit: 'index_0_1', note: 'ยังไม่มีแหล่งข้อมูลดัชนี'};
   const calls = [];
   const {context, inputs, elements} = fixture(async (url, options) => {
     calls.push({url, body: JSON.parse(options.body)});
@@ -133,13 +136,18 @@ test('one import button requests and fills all six readings while preserving the
   assert.equal(calls[0].body.scope, 'all');
   assert.equal(calls[0].body.soil_moisture, 0.8);
   for(const key of keys) assert.equal(inputs[key].value, readings[key].value);
-  assert.equal(inputs.soil_moisture.value, '0.8');
-  assert.match(elements['example-note'].textContent, /6\/6/);
-  assert.equal(elements['water-result'].children.length, 6);
+  assert.equal(inputs.month.value, 11);
+  assert.equal(inputs.soil_moisture.value, '');
+  assert.equal(inputs.typhoon_active.value, '');
+  assert.match(elements['example-note'].textContent, /7\/9/);
+  assert.match(elements['example-note'].textContent, /ไม่มีข้อมูลล่าสุด: มีพายุ, ดัชนีความชื้นดินของโมเดล/);
+  assert.match(elements['typhoon_active-import-note'].textContent, /ยังไม่มีแหล่งข้อมูลพายุ/);
+  assert.match(elements['soil_moisture-import-note'].textContent, /ยังไม่มีแหล่งข้อมูลดัชนี/);
+  assert.equal(elements['water-result'].children.length, 9);
   assert.equal(elements['water-button'].disabled, false);
 });
 
-test('invalid, missing or expired soil readings clear imported soil while preserving the manual model index', () => {
+test('invalid, missing or expired soil readings never substitute for a missing model index', () => {
   const {context, inputs} = fixture();
   const valid = {value: 0.31, status: 'fresh', observed_at: new Date().toISOString(), unit: 'm³/m³'};
   inputs.soil_moisture.value = '0.8';
@@ -149,6 +157,48 @@ test('invalid, missing or expired soil readings clear imported soil while preser
     inputs.soil_moisture_vwc.value = '0.45';
     vm.runInContext('waterSnapshot='+JSON.stringify({scope: 'all', readings: {soil_moisture_vwc: reading}})+';fillWaterInputs()', context);
     assert.equal(inputs.soil_moisture_vwc.value, '');
-    assert.equal(inputs.soil_moisture.value, '0.8');
+    assert.equal(inputs.soil_moisture.value, '');
   }
+});
+
+test('all nine fields import when provider context is available, including explicit no storm', () => {
+  const {context, inputs, elements} = fixture();
+  const readings = Object.fromEntries(keys.map(key => [key, {
+    value: 0.3, status: 'fresh', observed_at: new Date().toISOString(), unit: key==='soil_moisture_vwc'?'m³/m³':'test',
+  }]));
+  for(const [key, value, unit] of [['month',11,'month'],['typhoon_active',0,'0_or_1'],['soil_moisture',0.8,'index_0_1']]) {
+    readings[key] = {value, unit, status: 'fresh', observed_at: new Date().toISOString()};
+  }
+  vm.runInContext('waterSnapshot='+JSON.stringify({readings})+';fillWaterInputs()', context);
+  for(const key of Object.keys(readings)) assert.equal(inputs[key].value, readings[key].value);
+  assert.match(elements['example-note'].textContent, /9\/9/);
+  assert.doesNotMatch(elements['example-note'].textContent, /ไม่มีข้อมูลล่าสุด/);
+});
+
+test('unvalidated or stale context clears old values instead of silently treating them as current', () => {
+  const {context, inputs} = fixture();
+  for(const [key, value, unit, observed_at] of [
+    ['month',13,'month',new Date().toISOString()],
+    ['month',1.5,'month',new Date().toISOString()],
+    ['typhoon_active',2,'0_or_1',new Date().toISOString()],
+    ['soil_moisture',0.3,'m³/m³',new Date().toISOString()],
+    ['soil_moisture',0.3,'index_0_1',new Date(Date.now()-2*3600000).toISOString()],
+  ]) {
+    inputs[key].value = '1';
+    vm.runInContext('waterSnapshot='+JSON.stringify({readings:{[key]:{value, unit, observed_at, status:'fresh'}}})+';fillWaterInputs()', context);
+    assert.equal(inputs[key].value, '');
+  }
+});
+
+test('invalid old manual entries do not block importing replacement values', async () => {
+  let body;
+  const {context, inputs} = fixture(async (url, options) => {
+    body = JSON.parse(options.body);
+    return {ok: true, json: async () => ({readings: {}, history_id: 16, fetched_at: new Date().toISOString()})};
+  });
+  inputs.soil_moisture.value = '2';
+  inputs.soil_moisture.checkValidity = () => false;
+  await vm.runInContext('waterButton.onclick()', context);
+  assert.equal(body.soil_moisture, null);
+  assert.equal(inputs.soil_moisture.value, '');
 });

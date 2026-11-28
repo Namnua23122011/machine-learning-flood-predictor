@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as directory:
 
 class WeatherFetchTests(unittest.TestCase):
     def setUp(self):
-        self.environment = patch.dict(os.environ, {'OPEN_METEO_API_KEY': ''})
+        self.environment = patch.dict(os.environ, {'OPEN_METEO_API_KEY': '', 'FLOOD_DATA_URL': ''})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         api._weather_responses.clear()

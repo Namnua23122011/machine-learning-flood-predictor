@@ -7,11 +7,14 @@ Start the app with the same virtual environment:
 
 Restart an already-running server and refresh the page with Ctrl+F5.
 
-Click the API import button to fetch six measurements, fill the form, and save
-an immutable import record. The page has one button that imports all six readings
-together. The three manual fields are captured as entered at the
-moment of clicking; empty manual fields stay blank. Later edits and predictions do
-not change that record. Partial/failed readings are recorded with their status.
+Click the single API import button to check all nine dashboard fields, fill every
+available value, and save an immutable import record. Missing or stale values are
+cleared and identified by name; they are never replaced with zero. A typical import
+has seven available fields and two explicitly unavailable model inputs (see below).
+Any valid month, storm and model soil-index entries from before the click are saved
+separately as manual context, even when the imported fields replace or clear them.
+Invalid old entries do not block a new import. Later edits and predictions do not
+change that record. Partial/failed readings are recorded with their status.
 
 Open /history or the history link on the main page. Select a record to see its
 source timestamps and select a measurement to plot up to 200 imports through that
@@ -46,6 +49,37 @@ GET /api/history/export.xlsx
 A reused request_id returns the original record rather than creating a duplicate.
 Each new intentional button click has its own request_id.
 
+## Complete dashboard import
+
+The default `all` scope contains the existing six weather/station measurements plus:
+
+- `month`: derived from the latest completed Bangkok calendar day, matching the
+  daily rainfall target. On December 1, for example, this is November (11).
+- `typhoon_active`: an explicit 0/1 value only when a configured normalized provider
+  supplies it. Otherwise it is `null`, with `status: unavailable` and an explanation.
+  Missing storm data never means "no storm".
+- `soil_moisture`: the classifier's synthetic 0–1 index, only when a configured
+  normalized provider supplies that exact input. Otherwise it is `null`; imported
+  volumetric soil water content is not substituted.
+
+`available_count`, `requested_count`, and `missing_fields` report the exact import
+coverage. `manual_fields` lists prediction inputs still needing an entry. The page
+shows all nine reading cards, specific missing-field messages, and inline notes for
+month, storm and the model soil index. Importing does not run a prediction.
+
+The existing `FLOOD_DATA_URL` / `FLOOD_DATA_TOKEN` adapter can supply storm and model
+soil-index values using the [normalized realtime contract](REALTIME_README.md).
+Their required units are `0_or_1` and `index_0_1`, respectively. It must define how
+the data corresponds to the trained features. Values must be finite, in range,
+timestamped with a timezone, at most one hour old and no more than five minutes in
+the future. The month always comes from the calendar-day rainfall target.
+Missing, invalid or failed provider data stays unavailable; provider credentials
+are not included in history or exports.
+
+History, charts and Excel include all nine fields. Imported month/storm/index
+columns are distinct from the manual values captured before import. Older records
+remain unchanged and show blanks for fields they did not contain.
+
 ## Soil moisture and rainfall imports
 
 `GET /api/soil-moisture` returns `readings.soil_moisture_vwc`: Open-Meteo
@@ -59,7 +93,8 @@ The response includes the source URL, depth, observation time and returned grid 
 
 This measurement is displayed in its own read-only form field and included in
 history, charts and both Excel sheets. It is **not** the synthetic `soil_moisture`
-index used by the saved classifier. That index remains a separate manual input;
+index used by the saved classifier. That index requires a matching normalized
+provider or a manual entry;
 there is no calibrated conversion from volumetric water content to this model's
 index. `model_compatible: false` is included on available soil readings. Old records
 remain unchanged and show a blank for the new measurement.
@@ -88,7 +123,7 @@ These GET endpoints never save history. To fetch and persist a snapshot, use
 Generate a new UUID for each new import; reusing this example UUID returns the
 original record. Each record's `scope` identifies which readings were requested.
 The Excel summary records fresh and requested counts separately, so older and
-selective imports do not imply six readings were requested. Manual
+selective imports do not imply nine readings were requested. Manual
 `soil_moisture` in the POST body still means the model index, not imported m³/m³.
 
 Rain and soil data share one cached Open-Meteo response. Each is validated

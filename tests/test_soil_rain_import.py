@@ -93,12 +93,67 @@ class SoilParserTests(unittest.TestCase):
                 api.soil_moisture_reading({**weather_payload(), **changes}, NOW)
 
 
+class DashboardContextTests(unittest.TestCase):
+    def test_calendar_month_matches_completed_rain_day_at_month_and_year_boundaries(self):
+        with patch.dict(os.environ, {'FLOOD_DATA_URL': ''}):
+            for date, month in [(datetime(2026, 12, 1, 0, 10, tzinfo=api.TZ), 11),
+                                (datetime(2027, 1, 1, 1, tzinfo=api.TZ), 12),
+                                (NOW, 11)]:
+                with self.subTest(date=date):
+                    reading = api.get_dashboard_context(date)['month']
+                    self.assertEqual(reading['value'], month)
+                    self.assertEqual(reading['kind'], 'calendar')
+                    self.assertEqual(reading['status'], 'fresh')
+
+    def context_from_feed(self, fields=None, failure=None):
+        with patch.dict(os.environ, {'FLOOD_DATA_URL': 'https://provider.example/?token=private'}):
+            with patch.object(api, '_cached', None), patch.object(api, 'datetime', FixedDatetime):
+                with patch.object(api, 'fetch_json', return_value={'fields': fields or {}}, side_effect=failure):
+                    return api.get_dashboard_context(NOW)
+
+    def test_configured_provider_imports_model_index_and_explicit_no_storm(self):
+        fields = {key: {'value': value, 'unit': unit, 'source': 'Test provider',
+                        'observed_at': NOW.isoformat()}
+                  for key, value, unit in [('typhoon_active', 0, '0_or_1'),
+                                            ('soil_moisture', 0.8, 'index_0_1')]}
+        readings = self.context_from_feed(fields)
+        for key in fields:
+            self.assertEqual(readings[key]['value'], fields[key]['value'])
+            self.assertEqual(readings[key]['status'], 'fresh')
+            self.assertEqual(readings[key]['max_age_seconds'], 3600)
+        self.assertNotIn('private', str(readings))
+
+    def test_provider_rejects_wrong_units_stale_future_and_invalid_context(self):
+        valid = {'value': 0.8, 'unit': 'index_0_1', 'source': 'Test provider',
+                 'observed_at': NOW.isoformat()}
+        for changes in [{'unit': 'm³/m³'}, {'value': 1.2}, {'value': True},
+                        {'observed_at': (NOW-timedelta(hours=2)).isoformat()},
+                        {'observed_at': (NOW+timedelta(minutes=10)).isoformat()}]:
+            with self.subTest(changes=changes):
+                readings = self.context_from_feed({'soil_moisture': {**valid, **changes}})
+                self.assertIsNone(readings['soil_moisture']['value'])
+                self.assertEqual(readings['soil_moisture']['error_code'], 'provider_unavailable')
+        readings = self.context_from_feed({'typhoon_active': {**valid, 'unit': '0_or_1', 'value': False}})
+        self.assertIsNone(readings['typhoon_active']['value'])
+
+    def test_provider_failure_keeps_calendar_and_marks_unknowns(self):
+        readings = self.context_from_feed(failure=TimeoutError('private'))
+        self.assertEqual(readings['month']['value'], 11)
+        for key in ('typhoon_active', 'soil_moisture'):
+            self.assertIsNone(readings[key]['value'])
+            self.assertEqual(readings[key]['status'], 'unavailable')
+        self.assertNotIn('private', str(readings))
+
+
 class ImportEndpointTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.store = api.HistoryStore(directory.name)
         self.payload = weather_payload()
+        environment = patch.dict(os.environ, {'FLOOD_DATA_URL': ''})
+        environment.start()
+        self.addCleanup(environment.stop)
         patches = [patch.object(api, 'store', self.store),
                    patch.object(api, 'datetime', FixedDatetime),
                    patch.object(api, 'fetch', side_effect=lambda _: copy.deepcopy(self.payload)),
@@ -124,11 +179,19 @@ class ImportEndpointTests(unittest.TestCase):
         result = self.client.post('/api/import', json=request)
         self.assertEqual(result.status_code, 200)
         data = result.json()
-        self.assertEqual(len(data['readings']), 6)
+        self.assertEqual(len(data['readings']), 9)
         self.assertEqual(data['readings']['rainfall_24h']['value'], 0)
         self.assertEqual(data['readings']['rainfall_7day']['value'], 28)
         self.assertEqual(data['readings']['soil_moisture_vwc']['value'], 0.31)
-        self.assertTrue(data['all_available'])
+        self.assertEqual(data['readings']['month']['value'], 11)
+        self.assertFalse(data['all_available'])
+        self.assertEqual(data['available_count'], 7)
+        self.assertEqual(data['requested_count'], 9)
+        self.assertEqual(data['missing_fields'], ['typhoon_active', 'soil_moisture'])
+        self.assertEqual(data['manual_fields'], ['soil_moisture', 'typhoon_active'])
+        for key in ('typhoon_active', 'soil_moisture'):
+            self.assertIsNone(data['readings'][key]['value'])
+            self.assertEqual(data['readings'][key]['error_code'], 'not_configured')
         repeated = self.client.post('/api/import', json=request).json()
         self.assertEqual(repeated['history_id'], data['history_id'])
         self.assertEqual(self.mocks[-2].call_count, 1)
@@ -143,8 +206,11 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(row['Soil water content 0–1 cm (m³/m³)'], 0.31)
         self.assertEqual(row['Soil index 0–1 (manual)'], 0.8)
         self.assertEqual(row['Rain daily (mm)'], 0)
-        self.assertEqual(row['Fresh API fields'], 6)
-        self.assertEqual(row['Requested API fields'], 6)
+        self.assertEqual(row['Fresh API fields'], 7)
+        self.assertEqual(row['Requested API fields'], 9)
+        self.assertEqual(row['Month (imported)'], 11)
+        self.assertIsNone(row['Storm 0/1 (imported)'])
+        self.assertIsNone(row['Soil index 0–1 (imported)'])
         details = list(book['Reading details'].values)
         soil = dict(zip(details[0], next(r for r in details[1:] if r[1] == 'soil_moisture_vwc')))
         self.assertEqual(soil['Soil depth (cm)'], '0–1')
@@ -160,6 +226,26 @@ class ImportEndpointTests(unittest.TestCase):
             self.assertEqual(data['scope'], scope)
             self.assertEqual(self.store.get(data['history_id'])['snapshot']['scope'], scope)
         self.assertEqual(self.store.listing()['total'], 2)
+
+    def test_all_dashboard_fields_available_when_normalized_provider_supplies_context(self):
+        fields = {key: {'value': value, 'unit': unit, 'source': 'Test provider',
+                        'observed_at': NOW.isoformat()}
+                  for key, value, unit in [('typhoon_active', 0, '0_or_1'),
+                                            ('soil_moisture', 0.8, 'index_0_1')]}
+        with patch.dict(os.environ, {'FLOOD_DATA_URL': 'https://provider.example'}):
+            with patch.object(api, '_cached', None), patch.object(api, 'fetch_json', return_value={'fields': fields}):
+                response = self.client.post('/api/import', json={'request_id': str(uuid4())})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['all_available'])
+        self.assertEqual(data['available_count'], 9)
+        self.assertEqual(data['manual_fields'], [])
+        self.assertEqual(data['missing_fields'], [])
+        self.assertEqual(data['readings']['soil_moisture_vwc']['value'], 0.31)
+        self.assertEqual(data['readings']['soil_moisture']['value'], 0.8)
+        self.assertEqual(data['readings']['typhoon_active']['value'], 0)
+        record = self.store.get(data['history_id'])
+        self.assertEqual(record['snapshot']['readings'], data['readings'])
 
     def test_rain_and_soil_parse_failures_are_independent(self):
         self.payload['hourly'][SOIL][1] = None
