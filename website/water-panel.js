@@ -1,23 +1,29 @@
 'use strict';
 const waterButton=document.getElementById('water-button');
+const rainButton=document.getElementById('rain-button');
+const soilButton=document.getElementById('soil-button');
 const waterResult=document.getElementById('water-result');
+const importGroups={all:['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage','soil_moisture_vwc'],rainfall:['rainfall_24h','rainfall_7day','upstream_rain'],soil_moisture:['soil_moisture_vwc']};
+const readingTitles={rainfall_24h:'ฝนรายวัน',rainfall_7day:'ฝนสะสม 7 วันก่อนหน้า',ping_level:'ระดับน้ำปิง',upstream_rain:'ฝนต้นน้ำ',mae_ngat_storage:'น้ำในเขื่อนแม่งัด',soil_moisture_vwc:'ปริมาณน้ำในดิน 0–1 ซม.'};
 let waterSnapshot=null;
-waterButton.onclick=async()=>{
+waterButton.onclick=()=>importMeasurements('all');
+rainButton.onclick=()=>importMeasurements('rainfall');
+soilButton.onclick=()=>importMeasurements('soil_moisture');
+async function importMeasurements(scope){
  const manualContext={};
  for(const k of ['month','typhoon_active','soil_moisture']){const input=form.elements.namedItem(k);if(input.value!==''&&!input.checkValidity()){input.reportValidity();return;}manualContext[k]=input.value===''?null:Number(input.value);}
- setMode('manual');const requestGeneration=generation;waterButton.disabled=true;waterResult.textContent='กำลังดึงข้อมูลทั้ง 5 ช่อง…';waterSnapshot=null;
+ setMode('manual');const requestGeneration=generation;for(const button of [waterButton,rainButton,soilButton])button.disabled=true;waterResult.textContent=`กำลังดึงข้อมูล ${importGroups[scope].length} รายการ…`;waterSnapshot=null;
  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),90000);
  try{
-  const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:crypto.randomUUID(),...manualContext}),signal:abort.signal});
+  const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:crypto.randomUUID(),scope,...manualContext}),signal:abort.signal});
   const data=await response.json().catch(()=>null);
   if(!response.ok)throw new Error('นำเข้าไม่สำเร็จ (HTTP '+response.status+')'+(typeof data?.detail==='string'?': '+data.detail:''));
   if(!data?.readings)throw new Error('API ส่งข้อมูลกลับมาไม่ครบ กรุณาลองใหม่');
-  waterSnapshot=data;waterResult.replaceChildren();
-  const titles={rainfall_24h:'ฝนรายวัน',rainfall_7day:'ฝนสะสม 7 วันก่อนหน้า',ping_level:'ระดับน้ำปิง',upstream_rain:'ฝนต้นน้ำ',mae_ngat_storage:'น้ำในเขื่อนแม่งัด'};
-  for(const [key,title] of Object.entries(titles)){
-   const r=data.readings[key];const card=document.createElement('section');card.className='panel';
-   const h=document.createElement('h3');h.textContent=title;card.append(h);
-   const value=document.createElement('p');value.style='font-size:1.8rem;font-weight:700;margin:12px 0';value.textContent=r.value===null?'ไม่มีข้อมูล':`${r.value.toLocaleString('th-TH',{maximumFractionDigits:3})} ${r.unit}`;card.append(value);
+  waterSnapshot={...data,scope};waterResult.replaceChildren();
+  for(const key of importGroups[scope]){
+   const r=data.readings[key]||{};const card=document.createElement('section');card.className='panel';
+   const h=document.createElement('h3');h.textContent=readingTitles[key];card.append(h);
+   const value=document.createElement('p');value.style='font-size:1.8rem;font-weight:700;margin:12px 0';value.textContent=!Number.isFinite(r.value)?'ไม่มีข้อมูล':`${r.value.toLocaleString('th-TH',{maximumFractionDigits:3})} ${r.unit||''}`;card.append(value);
    for(const text of [r.status==='fresh'?'ข้อมูลล่าสุดตามรอบรายงาน':r.status==='stale'?'ข้อมูลเก่า — ไม่เติมลงแบบฟอร์ม':'แหล่งข้อมูลไม่พร้อม',r.station,r.observed_at?'วันเวลารายงาน: '+r.observed_at+' (ประเทศไทย)':null,r.source,r.note]){if(text){const p=document.createElement('p');p.className='hint';p.style.margin='6px 0';p.textContent=text;card.append(p);}}
    if(r.retry_after_seconds){const p=document.createElement('p');p.className='hint';p.textContent=`ลองดึงอีกครั้งได้ในประมาณ ${Math.ceil(r.retry_after_seconds/60)} นาที หากยังถูกจำกัดอาจต้องรอให้โควตาของผู้ให้บริการคืนค่า`;card.append(p);}
    if(key==='mae_ngat_storage'&&r.details){const p=document.createElement('p');p.textContent=`ปริมาณน้ำ ${r.details.storage_million_m3} / ความจุปกติ ${r.details.normal_capacity_million_m3} ล้าน ลบ.ม. (ความจุสูงสุด ${r.details.maximum_capacity_million_m3} ล้าน ลบ.ม.)`;card.append(p);}
@@ -29,8 +35,8 @@ waterButton.onclick=async()=>{
   const historyLink=document.createElement('a');historyLink.href='/history?id='+data.history_id;historyLink.textContent=' ดูรายการนี้และกราฟ';document.getElementById('water-time').append(historyLink);
   if(data.excel_warning){const warning=document.createElement('p');warning.textContent=data.excel_warning;warning.style.color='#a23b16';waterResult.append(warning);}
  }catch(e){waterResult.textContent=e.name==='AbortError'?'หมดเวลารอเซิร์ฟเวอร์ กรุณาดูประวัติก่อนลองอีกครั้ง':e instanceof TypeError?'เชื่อมต่อ API ไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตและสถานะเซิร์ฟเวอร์ แล้วดูประวัติก่อนลองอีกครั้ง':e.message;document.getElementById('water-time').textContent='';}
- finally{clearTimeout(timer);waterButton.disabled=false;}
-};
+ finally{clearTimeout(timer);for(const button of [waterButton,rainButton,soilButton])button.disabled=false;}
+}
 function observationDate(value){
  if(typeof value!=='string')return new Date(NaN);
  let time=value.trim().replace(' ','T');
@@ -40,14 +46,16 @@ function observationDate(value){
 }
 function fillWaterInputs(){
  if(!waterSnapshot)return;let count=0;
- for(const key of ['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage']){
-  const r=waterSnapshot.readings[key];
+ const keys=importGroups[waterSnapshot.scope||'all'];
+ for(const key of keys){
+  const r=waterSnapshot.readings[key]||{};
   const maxAge=['mae_ngat_storage','rainfall_24h','rainfall_7day'].includes(key)?48*3600:3*3600;
   const observed=observationDate(r.observed_at);
   const age=(Date.now()-observed.getTime())/1000;
   const input=form.elements.namedItem(key);
-  if(r.status==='fresh'&&Number.isFinite(r.value)&&Number.isFinite(age)&&age>=-300&&age<=maxAge&&!(input.max&&r.value>Number(input.max))){input.value=r.value;count++;}else input.value='';
+  const validUnit=key!=='soil_moisture_vwc'||r.unit==='m³/m³';
+  if(r.status==='fresh'&&validUnit&&Number.isFinite(r.value)&&Number.isFinite(age)&&age>=-300&&age<=maxAge&&!(input.min!==''&&input.min!=null&&r.value<Number(input.min))&&!(input.max&&r.value>Number(input.max))){input.value=r.value;count++;}else input.value='';
  }
- const summary=count===0?'ยังนำเข้าข้อมูลล่าสุดไม่ได้ (0/5 ช่อง) โปรดดูสาเหตุที่ข้อมูลแต่ละแหล่ง':`เติมข้อมูลล่าสุด ${count}/5 ช่องแล้ว${count<5?' ช่องที่เหลือไม่มีข้อมูลล่าสุดพร้อมใช้':''}`;
- clearResult();document.getElementById('example-note').textContent=summary+' · เดือน พายุ และความชื้นดินยังเป็นค่าที่คุณกำหนด โปรดตรวจวันที่ของข้อมูลแต่ละแหล่งก่อนคำนวณ';document.getElementById('example-note').hidden=false;
-};
+ const summary=count===0?`ยังนำเข้าข้อมูลล่าสุดไม่ได้ (0/${keys.length} ช่อง) โปรดดูสาเหตุที่ข้อมูลแต่ละแหล่ง`:`เติมข้อมูลล่าสุด ${count}/${keys.length} ช่องแล้ว${count<keys.length?' ช่องที่เหลือไม่มีข้อมูลล่าสุดพร้อมใช้':''}`;
+ clearResult();document.getElementById('example-note').textContent=summary+' · เดือน พายุ และดัชนีความชื้นดินของโมเดลยังเป็นค่าที่คุณกำหนด ปริมาณน้ำในดินที่นำเข้าแสดงแยกเป็น m³/m³ โปรดตรวจวันที่ก่อนคำนวณ';document.getElementById('example-note').hidden=false;
+}

@@ -1,8 +1,8 @@
 'use strict';
 const byId=id=>document.getElementById(id);
-const fields=['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage'];
-const titles=['ฝนรายวัน','ฝนสะสม 7 วันก่อนหน้า','ฝนต้นน้ำ 24 ชั่วโมง','ระดับน้ำปิง','น้ำในเขื่อนแม่งัด'];
-const units=['มม.','มม.','มม./24 ชม.','ม.','%'];
+const fields=['rainfall_24h','rainfall_7day','upstream_rain','ping_level','mae_ngat_storage','soil_moisture_vwc'];
+const titles=['ฝนรายวัน','ฝนสะสม 7 วันก่อนหน้า','ฝนต้นน้ำ 24 ชั่วโมง','ระดับน้ำปิง','น้ำในเขื่อนแม่งัด','ปริมาณน้ำในดิน 0–1 ซม.'];
+const units=['มม.','มม.','มม./24 ชม.','ม.','%','m³/m³'];
 const statuses={fresh:'พร้อมใช้ขณะนำเข้า',stale:'ข้อมูลเก่า',unavailable:'ไม่มีข้อมูล'};
 let offset=0,selected=null,series=[],listVersion=0,detailVersion=0;
 const fmt=x=>typeof x==='number'&&Number.isFinite(x)?x.toLocaleString('th-TH',{maximumFractionDigits:3}):'—';

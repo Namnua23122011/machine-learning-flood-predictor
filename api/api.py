@@ -11,6 +11,7 @@ import logging
 import math
 import os
 from pathlib import Path
+from typing import Literal
 import sqlite3
 import tempfile
 import threading
@@ -192,6 +193,8 @@ def weather_inputs(data, now):
     daily = data['daily']
     if data.get('daily_units', {}).get('rain_sum') != 'mm':
         raise ValueError('Unexpected rainfall unit')
+    if len(daily['time']) != len(daily['rain_sum']) or len(set(daily['time'])) != len(daily['time']):
+        raise ValueError('Invalid daily rainfall arrays')
     day = now.date() - timedelta(days=1)
     lookup = dict(zip(daily['time'], daily['rain_sum']))
     dates = [(day - timedelta(days=i)).isoformat() for i in range(8)]
@@ -223,10 +226,7 @@ def get_realtime():
                 values, metadata = normalized_feed(
                     fetch_json(provider, os.environ.get('FLOOD_DATA_TOKEN')), now)
             else:
-                url = 'https://api.open-meteo.com/v1/forecast?' + urlencode({
-                    'latitude': 18.7883, 'longitude': 98.9853, 'daily': 'rain_sum',
-                    'past_days': 8, 'forecast_days': 1, 'timezone': 'Asia/Bangkok'})
-                values, metadata = weather_inputs(fetch_weather(url), now)
+                values, metadata = weather_inputs(fetch_weather(RAIN_URL), now)
         except Exception:
             # Do not expose upstream URLs, tokens, or response internals.
             errors.append('ดึงข้อมูลจากผู้ให้บริการไม่สำเร็จ กรุณาลองใหม่ภายหลัง')
@@ -333,40 +333,104 @@ def get_water_summary():
 
 RAIN_URL = 'https://api.open-meteo.com/v1/forecast?' + urlencode({
     'latitude':18.7883, 'longitude':98.9853, 'daily':'rain_sum',
+    'hourly':'soil_moisture_0_to_1cm', 'precipitation_unit':'mm',
     'past_days':8, 'forecast_days':1, 'timezone':'Asia/Bangkok'})
+IMPORT_FIELDS = {
+    'rainfall': ('rainfall_24h', 'rainfall_7day', 'upstream_rain'),
+    'soil_moisture': ('soil_moisture_vwc',),
+    'all': ('rainfall_24h', 'rainfall_7day', 'upstream_rain', 'ping_level',
+            'mae_ngat_storage', 'soil_moisture_vwc'),
+}
 
-def get_all_inputs():
+
+def soil_moisture_reading(data, now):
+    """Import surface water content; never substitute it for the synthetic index."""
+    key = 'soil_moisture_0_to_1cm'
+    units, hourly = data['hourly_units'], data['hourly']
+    if units.get(key) != 'm³/m³' or units.get('time') != 'iso8601':
+        raise ValueError('Unexpected soil moisture units')
+    if data.get('utc_offset_seconds') != 25200 or data.get('timezone') != 'Asia/Bangkok':
+        raise ValueError('Unexpected soil moisture timezone')
+    times, values = hourly['time'], hourly[key]
+    if not times or len(times) != len(values):
+        raise ValueError('Invalid soil moisture arrays')
+    observations = [stamp(value) for value in times]
+    if any(b <= a for a, b in zip(observations, observations[1:])):
+        raise ValueError('Unsorted or duplicate soil moisture timestamps')
+    eligible = [i for i, observed in enumerate(observations) if observed <= now]
+    if not eligible:
+        raise ValueError('No soil moisture at or before the current time')
+    index = eligible[-1]
+    value = values[index]
+    # A missing latest hour stays missing; do not silently use an earlier value.
+    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError('Invalid soil moisture value')
+    observed = observations[index].astimezone(TZ).isoformat()
+    return {
+        'value': value, 'unit': 'm³/m³', 'observed_at': observed,
+        'status': freshness(observed, now), 'kind': 'weather_model_estimate',
+        'source': 'Open-Meteo (แบบจำลองอากาศ)', 'source_url': RAIN_URL,
+        'station': 'พิกัดเมืองเชียงใหม่ 18.7883, 98.9853',
+        'model_compatible': False,
+        'note': 'ปริมาณน้ำในดินชั้น 0–1 ซม. จากแบบจำลองอากาศ ไม่ใช่ค่าตรวจวัดสถานี และใช้แทนดัชนีความชื้นดิน 0–1 ของโมเดลน้ำท่วมโดยตรงไม่ได้',
+        'details': {'depth_cm': '0–1', 'grid_latitude': data.get('latitude'),
+                    'grid_longitude': data.get('longitude')},
+    }
+
+
+def get_weather_readings():
+    now = datetime.now(TZ)
+    keys = ('rainfall_24h', 'rainfall_7day', 'soil_moisture_vwc')
+    try:
+        data = fetch(RAIN_URL)
+    except Exception as exc:
+        return {key: {'value': None, 'status': 'unavailable',
+                      **provider_error(exc), 'source_url': RAIN_URL} for key in keys}
+    readings = {}
+    try:
+        values, metadata = weather_inputs(data, now)
+        for key in keys[:2]:
+            readings[key] = {
+                'value': values[key], 'unit': 'มม.', 'status': 'fresh',
+                'observed_at': metadata[key]['observed_at'],
+                'kind': 'weather_model_estimate',
+                'source': 'Open-Meteo (แบบจำลองอากาศ)',
+                'source_url': RAIN_URL, 'station': 'พิกัดเมืองเชียงใหม่ 18.7883, 98.9853',
+                'note': ('ฝนของวันล่าสุดที่จบแล้ว ไม่ใช่สถานีวัดสด' if key == 'rainfall_24h'
+                         else 'ฝนสะสม 7 วันก่อนวันเป้าหมาย ไม่รวมวันเป้าหมาย ตามสูตรฝึกโมเดล')}
+    except Exception as exc:
+        for key in keys[:2]:
+            readings[key] = {'value': None, 'status': 'unavailable',
+                             **provider_error(exc), 'source_url': RAIN_URL}
+    try:
+        readings['soil_moisture_vwc'] = soil_moisture_reading(data, now)
+    except Exception as exc:
+        readings['soil_moisture_vwc'] = {'value': None, 'status': 'unavailable',
+                                      **provider_error(exc), 'source_url': RAIN_URL}
+    return readings
+
+
+def get_all_inputs(scope='all'):
     now = datetime.now(TZ)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        water = pool.submit(get_water_summary)
-        rain = pool.submit(fetch, RAIN_URL)
-        result = water.result()
-        try:
-            values, metadata = weather_inputs(rain.result(), now)
-            for key in ('rainfall_24h', 'rainfall_7day'):
-                result['readings'][key] = {
-                    'value':values[key], 'unit':'มม.', 'status':'fresh',
-                    'observed_at':metadata[key]['observed_at'],
-                    'source':'Open-Meteo (แบบจำลองอากาศ)',
-                    'source_url':RAIN_URL, 'station':'พิกัดเมืองเชียงใหม่ 18.7883, 98.9853',
-                    'note':('ฝนของวันล่าสุดที่จบแล้ว ไม่ใช่สถานีวัดสด' if key=='rainfall_24h'
-                            else 'ฝนสะสม 7 วันก่อนวันเป้าหมาย ไม่รวมวันเป้าหมาย ตามสูตรฝึกโมเดล')}
-        except Exception as exc:
-            error = provider_error(exc)
-            for key in ('rainfall_24h','rainfall_7day'):
-                result['readings'][key] = {'value':None,'status':'unavailable',
-                    **error, 'source_url':RAIN_URL}
-    result['water_fetched_at'] = result['fetched_at']
+        water = pool.submit(get_water_summary) if scope != 'soil_moisture' else None
+        weather = pool.submit(get_weather_readings)
+        result = water.result() if water else {'readings': {}, 'fetched_at': now.isoformat(), 'refresh_seconds': 300}
+        result['readings'].update(weather.result())
+    result['readings'] = {key: result['readings'][key] for key in IMPORT_FIELDS[scope]}
+    result['scope'] = scope
+    result['water_fetched_at'] = result['fetched_at'] if water else None
     result['fetched_at'] = now.isoformat()
+    result['checked_at'] = now.isoformat()
     result['all_available'] = all(r['status']=='fresh' for r in result['readings'].values())
     result['manual_fields'] = ['month','typhoon_active','soil_moisture']
-    result['note'] = 'ข้อมูลต่างช่วงเวลา: ฝนรายวันเป็นค่าประมาณย้อนหลัง น้ำปิง/ฝนต้นน้ำเป็นค่าล่าสุด เขื่อนเป็นรายวัน โปรดตรวจวันที่ก่อนทำนาย'
+    result['note'] = 'ข้อมูลต่างช่วงเวลา: ฝนรายวันเป็นค่าประมาณย้อนหลัง น้ำปิง/ฝนต้นน้ำเป็นค่าล่าสุด เขื่อนเป็นรายวัน ปริมาณน้ำในดินเป็นค่าประมาณรายชั่วโมง หน่วย m³/m³ โปรดตรวจวันที่ก่อนทำนาย'
     return result
 
 
 # History storage and Excel export
 
-HISTORY_FIELDS = ['rainfall_24h', 'rainfall_7day', 'upstream_rain', 'ping_level', 'mae_ngat_storage']
+HISTORY_FIELDS = list(IMPORT_FIELDS['all'])
 HISTORY_MANUAL = ['month', 'typhoon_active', 'soil_moisture']
 TZ = timezone(timedelta(hours=7))
 
@@ -448,19 +512,20 @@ class HistoryStore:
         book = Workbook()
         summary = book.active
         summary.title = 'Imports'
-        summary.append(['Import ID', 'Imported at (Bangkok)', 'Rain daily (mm)', 'Rain prior 7 days (mm)', 'Upstream rain 24h (mm)', 'Ping gauge level (m)', 'Mae Ngat storage (%)', 'Month (manual)', 'Storm 0/1 (manual)', 'Soil index 0–1 (manual)', 'Fresh API fields / 5'])
+        summary.append(['Import ID', 'Imported at (Bangkok)', 'Rain daily (mm)', 'Rain prior 7 days (mm)', 'Upstream rain 24h (mm)', 'Ping gauge level (m)', 'Mae Ngat storage (%)', 'Soil water content 0–1 cm (m³/m³)', 'Month (manual)', 'Storm 0/1 (manual)', 'Soil index 0–1 (manual)', 'Fresh API fields', 'Requested API fields', 'Import scope'])
         details = book.create_sheet('Reading details')
-        details.append(['Import ID', 'Field', 'Value', 'Unit', 'Status at import', 'Observation time (Bangkok)', 'Source', 'Station', 'Source URL', 'Notes', 'Volume (million m3)', 'Normal capacity (million m3)', 'Max capacity (million m3)'])
+        details.append(['Import ID', 'Field', 'Value', 'Unit', 'Status at import', 'Observation time (Bangkok)', 'Source', 'Station', 'Source URL', 'Notes', 'Volume (million m3)', 'Normal capacity (million m3)', 'Max capacity (million m3)', 'Soil depth (cm)', 'Grid latitude', 'Grid longitude'])
         for record in records:
             readings = record['snapshot'].get('readings', {})
             summary.append([record['id'], datetime.fromisoformat(record['imported_at']).astimezone(TZ).replace(tzinfo=None),
                             *[readings.get(k, {}).get('value') for k in HISTORY_FIELDS],
                             *[record['manual'].get(k) for k in HISTORY_MANUAL],
-                            sum(readings.get(k, {}).get('status') == 'fresh' for k in HISTORY_FIELDS)])
+                            sum(readings.get(k, {}).get('status') == 'fresh' for k in HISTORY_FIELDS),
+                            len(readings), record['snapshot'].get('scope', 'all')])
             for key in HISTORY_FIELDS:
                 r = readings.get(key, {})
                 extra = r.get('details', {})
-                details.append([record['id'], key, r.get('value'), r.get('unit'), r.get('status'), r.get('observed_at'), r.get('source'), r.get('station'), r.get('source_url'), r.get('note'), extra.get('storage_million_m3'), extra.get('normal_capacity_million_m3'), extra.get('maximum_capacity_million_m3')])
+                details.append([record['id'], key, r.get('value'), r.get('unit'), r.get('status'), r.get('observed_at'), r.get('source'), r.get('station'), r.get('source_url'), r.get('note'), extra.get('storage_million_m3'), extra.get('normal_capacity_million_m3'), extra.get('maximum_capacity_million_m3'), extra.get('depth_cm'), extra.get('grid_latitude'), extra.get('grid_longitude')])
         for sheet in book:
             sheet.freeze_panes = 'C2'
             sheet.auto_filter.ref = sheet.dimensions
@@ -664,6 +729,7 @@ history_router = APIRouter()
 class ImportRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, allow_inf_nan=False)
     request_id: str
+    scope: Literal['all', 'rainfall', 'soil_moisture'] = 'all'
     month: int | None = Field(None, ge=1, le=12)
     typhoon_active: int | None = Field(None, ge=0, le=1)
     soil_moisture: float | None = Field(None, ge=0, le=1)
@@ -677,7 +743,7 @@ def import_snapshot(body: ImportRequest):
     record = store.by_request(key)
     if record:
         return {**record['snapshot'], 'history_id': record['id'], 'imported_at': record['imported_at'], 'excel_warning': None}
-    snapshot = get_all_inputs()
+    snapshot = get_all_inputs(body.scope)
     try:
         record, warning = store.save(key, snapshot, {k: getattr(body, k) for k in ('month', 'typhoon_active', 'soil_moisture')})
     except Exception as exc:
@@ -792,6 +858,18 @@ def realtime_data():
 @app.get("/api/water-summary")
 def water_summary():
     return get_all_inputs()
+
+
+@app.get('/api/soil-moisture')
+def soil_moisture_data():
+    """Latest surface soil water content (m³/m³); does not write history."""
+    return get_all_inputs('soil_moisture')
+
+
+@app.get('/api/rainfall')
+def rainfall_data():
+    """Daily/prior-seven-day city rainfall and upstream 24h rainfall, in mm."""
+    return get_all_inputs('rainfall')
 
 
 @app.get("/water-panel.js", response_class=FileResponse)

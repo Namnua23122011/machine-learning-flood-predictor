@@ -7,8 +7,9 @@ Start the app with the same virtual environment:
 
 Restart an already-running server and refresh the page with Ctrl+F5.
 
-Click the API import button to fetch the five measurements, fill the form, and save
-an immutable import record. The three manual fields are captured as entered at the
+Click the API import button to fetch six measurements, fill the form, and save
+an immutable import record. You can also import only rainfall (three readings) or
+only soil moisture (one reading); other form values are preserved. The three manual fields are captured as entered at the
 moment of clicking; empty manual fields stay blank. Later edits and predictions do
 not change that record. Partial/failed readings are recorded with their status.
 
@@ -35,7 +36,9 @@ Back up the data directory. The page and exports are accessible to anyone who ca
 access this app; no login system has been added.
 
 New endpoints:
-POST /api/import (request_id UUID, optional month, typhoon_active, soil_moisture)
+POST /api/import (request_id UUID, optional scope, month, typhoon_active, soil_moisture)
+GET /api/soil-moisture
+GET /api/rainfall
 GET /api/history?offset=0&limit=50
 GET /api/history/{id}
 GET /api/history/export.xlsx
@@ -43,10 +46,60 @@ GET /api/history/export.xlsx
 A reused request_id returns the original record rather than creating a duplicate.
 Each new intentional button click has its own request_id.
 
+## Soil moisture and rainfall imports
+
+`GET /api/soil-moisture` returns `readings.soil_moisture_vwc`: Open-Meteo
+volumetric soil water content at 0–1 cm depth for Chiang Mai (18.7883, 98.9853),
+in **m³/m³**. The latest hourly timestamp at or before the current Bangkok time
+is selected. This is a weather model estimate, not a station observation.
+Readings older than three hours are marked stale; future values are excluded.
+Wrong units, missing latest values, invalid timestamps, nonfinite values and values
+outside 0–1 are unavailable, with no substitution from earlier hours or with zero.
+The response includes the source URL, depth, observation time and returned grid coordinates.
+
+This measurement is displayed in its own read-only form field and included in
+history, charts and both Excel sheets. It is **not** the synthetic `soil_moisture`
+index used by the saved classifier. That index remains a separate manual input;
+there is no calibrated conversion from volumetric water content to this model's
+index. `model_compatible: false` is included on available soil readings. Old records
+remain unchanged and show a blank for the new measurement.
+
+`GET /api/rainfall` returns three readings in millimetres:
+
+- `rainfall_24h`: Open-Meteo `rain_sum` for the latest completed Bangkok calendar day.
+- `rainfall_7day`: sum of the seven days before that day, excluding it.
+- `upstream_rain`: ThaiWater MOU001 station's latest 24-hour total.
+
+City rainfall keeps the existing `rain_sum` definition; it is not a rolling
+24-hour total or the forecast page's `rain + showers` total. Incomplete daily
+windows remain unavailable. Genuine zero rainfall is imported as zero.
+
+These GET endpoints never save history. To fetch and persist a snapshot, use
+`POST /api/import` with `scope` set to `all` (default, backward compatible),
+`rainfall`, or `soil_moisture`, for example:
+
+```json
+{
+  "request_id": "0a4f762c-4b96-4778-83ec-cb82a672b780",
+  "scope": "soil_moisture"
+}
+```
+
+Generate a new UUID for each new import; reusing this example UUID returns the
+original record. Each record's `scope` identifies which readings were requested.
+The Excel summary records fresh and requested counts separately, so older and
+selective imports do not imply six readings were requested. Manual
+`soil_moisture` in the POST body still means the model index, not imported m³/m³.
+
+Rain and soil data share one cached Open-Meteo response. Each is validated
+independently, so missing soil data does not discard valid rainfall, or vice versa.
+Soil-only requests do not contact ThaiWater. Provider reference:
+[Open-Meteo hourly soil moisture and daily rainfall documentation](https://open-meteo.com/en/docs).
+
 ## Provider failures on hosted deployments
 
 The import can save a history record even when an upstream provider is unavailable.
-Check each reading's status and note; a saved record does not mean all five values
+Check each reading's status and note; a saved record does not mean all requested values
 were fetched. Unavailable values stay blank, including when the provider returns
 HTTP 429 (Too Many Requests).
 
@@ -66,9 +119,11 @@ both imports and forecasts. Without a key the free endpoint is used. Keys stay o
 the server and are not included in source links, history exports, or error messages.
 See https://open-meteo.com/en/pricing for the provider's current limits and plans.
 
-Run regression checks from the project root:
+Run regression checks from the project root. The endpoint tests also need
+`httpx==0.28.1` in the test environment (not needed to run the app):
 
 ```powershell
+.\myenv.venv\Scripts\python.exe -m pip install httpx==0.28.1
 .\myenv.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_*.py'
 node --test tests/water-import.test.cjs
 ```
